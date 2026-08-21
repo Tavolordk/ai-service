@@ -1,0 +1,61 @@
+services:
+  ollama:
+    image: ollama/ollama:0.32.9
+    container_name: profile-intelligence-ollama
+    environment:
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_KEEP_ALIVE: "10m"
+    volumes:
+      - ollama-models:/root/.ollama
+    networks:
+      - ai-model-private
+    restart: unless-stopped
+
+  profile-intelligence-api:
+    build: .
+    container_name: profile-intelligence-api
+    depends_on:
+      - ollama
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      AI_ALLOWED_ORIGINS: "http://localhost:4200,http://127.0.0.1:4200,http://localhost:4202,http://127.0.0.1:4202,http://localhost:4204,http://127.0.0.1:4204"
+      AI_ALLOWED_HOSTS: "localhost,127.0.0.1"
+      AI_ENABLE_DOCS: "false"
+      AI_MAX_CONTENT_LENGTH: "5242880"
+
+      # Inferencia 100% local. La API sólo acepta como destino LLM el hostname interno "ollama".
+      AI_LLM_ENABLED: "true"
+      AI_LLM_BASE_URL: "http://ollama:11434"
+      AI_LLM_ALLOWED_HOSTS: "ollama"
+      AI_LLM_MODEL: "qwen3:4b"
+      AI_LLM_TIMEOUT_SECONDS: "180"
+      AI_LLM_TEMPERATURE: "0.15"
+      AI_LLM_MAX_PREDICT: "900"
+      AI_LLM_MAX_EVIDENCE: "72"
+      AI_LLM_HISTORY_MESSAGES: "8"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - ai-host
+      - ai-model-private
+    restart: unless-stopped
+
+networks:
+  # Se usa sólo para publicar 127.0.0.1:8080 hacia Windows.
+  ai-host:
+    driver: bridge
+  # Ollama vive en esta red interna y no tiene puerto publicado al host.
+  # Tras descargar el modelo, el script de setup desconecta su acceso temporal a Internet.
+  ai-model-private:
+    driver: bridge
+    internal: true
+
+volumes:
+  ollama-models:
+    name: profile-intelligence-ollama-models
