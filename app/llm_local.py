@@ -13,6 +13,64 @@ class LocalLlmError(RuntimeError):
     pass
 
 
+class _VisibleContentFilter:
+    """Elimina bloques <think>...</think> aunque lleguen partidos en varios chunks."""
+
+    OPEN = '<think>'
+    CLOSE = '</think>'
+
+    def __init__(self) -> None:
+        self.buffer = ''
+        self.inside_think = False
+
+    def feed(self, chunk: str) -> str:
+        self.buffer += chunk
+        visible: list[str] = []
+
+        while self.buffer:
+            lowered = self.buffer.lower()
+
+            if self.inside_think:
+                close_index = lowered.find(self.CLOSE)
+                if close_index >= 0:
+                    self.buffer = self.buffer[close_index + len(self.CLOSE):]
+                    self.inside_think = False
+                    continue
+                keep = min(len(self.buffer), len(self.CLOSE) - 1)
+                self.buffer = self.buffer[-keep:] if keep else ''
+                break
+
+            open_index = lowered.find(self.OPEN)
+            if open_index >= 0:
+                if open_index:
+                    visible.append(self.buffer[:open_index])
+                self.buffer = self.buffer[open_index + len(self.OPEN):]
+                self.inside_think = True
+                continue
+
+            hold = 0
+            max_suffix = min(len(self.buffer), len(self.OPEN) - 1)
+            for size in range(1, max_suffix + 1):
+                if self.OPEN.startswith(self.buffer[-size:].lower()):
+                    hold = size
+
+            emit_until = len(self.buffer) - hold
+            if emit_until > 0:
+                visible.append(self.buffer[:emit_until])
+                self.buffer = self.buffer[emit_until:]
+            break
+
+        return ''.join(visible)
+
+    def flush(self) -> str:
+        if self.inside_think:
+            self.buffer = ''
+            return ''
+        visible = self.buffer
+        self.buffer = ''
+        return visible
+
+
 @dataclass(frozen=True)
 class LocalLlmStatus:
     reachable: bool
@@ -84,10 +142,18 @@ class LocalOllamaClient:
         if not self.settings.llm_enabled:
             raise LocalLlmError('LLM local deshabilitado.')
 
+        runtime_messages = [dict(message) for message in messages]
+        directive = '/think' if thinking else '/no_think'
+        for index in range(len(runtime_messages) - 1, -1, -1):
+            if runtime_messages[index].get('role') == 'user':
+                content = str(runtime_messages[index].get('content') or '').rstrip()
+                runtime_messages[index]['content'] = f'{content}\n\n{directive}'
+                break
+
         payload = json.dumps(
             {
                 'model': self.settings.llm_model,
-                'messages': messages,
+                'messages': runtime_messages,
                 'stream': True,
                 'think': thinking,
                 'keep_alive': '10m',
@@ -124,6 +190,8 @@ class LocalOllamaClient:
                     )
                 raise LocalLlmError(f'El runtime local respondió HTTP {response.status}.')
 
+            visible_filter = _VisibleContentFilter()
+
             while True:
                 raw = response.readline()
                 if not raw:
@@ -144,11 +212,19 @@ class LocalOllamaClient:
                 # Sólo se transmite message.content al cliente.
 
                 message = item.get('message') or {}
+
+                # message.thinking se descarta deliberadamente.
+                # Sólo message.content puede salir al frontend.
                 content = message.get('content')
                 if content:
-                    yield str(content)
+                    visible = visible_filter.feed(str(content))
+                    if visible:
+                        yield visible
 
                 if item.get('done'):
+                    tail = visible_filter.flush()
+                    if tail:
+                        yield tail
                     break
         except (OSError, TimeoutError, http.client.HTTPException) as exc:
             raise LocalLlmError(f'No fue posible consultar el modelo local: {type(exc).__name__}.') from exc

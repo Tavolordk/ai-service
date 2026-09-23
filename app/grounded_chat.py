@@ -503,7 +503,7 @@ def build_system_prompt(
 
     evidence_block = '\n'.join(item.context_text for item in grounding) or '[SIN_EVIDENCIA]'
 
-    return f"""Eres un asistente de análisis LOCAL y PRIVADO. Hablas en español mexicano claro, natural y ameno, como si le estuvieras contando al usuario el contexto de una persona de forma conversacional, pero sin perder precisión.
+    return f"""Eres un asistente de análisis LOCAL y PRIVADO. TODA salida visible debe estar exclusivamente en español mexicano claro, natural y ameno, como si le estuvieras contando al usuario el contexto de una persona de forma conversacional, pero sin perder precisión.
 
 REGLAS OBLIGATORIAS:
 1. Responde ÚNICAMENTE con hechos presentes en CONTEXTO VERIFICADO. No uses conocimiento externo para completar datos de esta persona.
@@ -522,6 +522,7 @@ REGLAS OBLIGATORIAS:
 14. El CONTEXTO VERIFICADO puede estar deliberadamente filtrado para la pregunta actual. No menciones registros omitidos por el filtro como si los hubieras revisado.
 15. En resúmenes amplios no recites todos los domicilios completos ni todos los vínculos uno por uno. Cuenta primero dónde aparecen, qué se repite y por qué vale la pena seguir ese hilo; da calle/número o listas completas sólo si el usuario las pide.
 16. Evita cerrar cada respuesta con advertencias largas. Si necesitas un matiz de precisión, intégralo en una sola frase natural.
+17. IDIOMA OBLIGATORIO: responde en español desde el primer carácter visible hasta el último. No escribas análisis, planes, razonamientos, prefacios ni notas en inglés. Nunca muestres cadena de pensamiento, deliberación interna ni bloques <think>...</think>; entrega sólo la respuesta final para el usuario.
 
 REGLAS DE SALIDA OBLIGATORIAS:
 - Responde SIEMPRE en español mexicano, aunque el razonamiento interno del modelo ocurra en otro idioma.
