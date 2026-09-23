@@ -523,9 +523,6 @@ REGLAS OBLIGATORIAS:
 15. En resúmenes amplios no recites todos los domicilios completos ni todos los vínculos uno por uno. Cuenta primero dónde aparecen, qué se repite y por qué vale la pena seguir ese hilo; da calle/número o listas completas sólo si el usuario las pide.
 16. Evita cerrar cada respuesta con advertencias largas. Si necesitas un matiz de precisión, intégralo en una sola frase natural.
 
-REGLAS DE SALIDA OBLIGATORIAS:
-- Responde SIEMPRE en español mexicano, aunque el razonamiento interno del modelo ocurra en otro idioma.
-- Entrega únicamente la respuesta final al usuario. Nunca expongas cadena de pensamiento, deliberación interna, borradores ni etiquetas <think>.
 FOCO DE ESTA PREGUNTA:
 {_focus_instruction(request, plan)}
 
@@ -602,7 +599,7 @@ class GroundedChatEngine:
         full_text = ''
         try:
             messages = build_messages(request, grounding, self.settings, plan)
-            for chunk in self.llm.stream_chat(messages, thinking=request.thinking):
+            for chunk in self.llm.stream_chat(messages):
                 full_text += chunk
                 yield {'type': 'delta', 'text': chunk}
 

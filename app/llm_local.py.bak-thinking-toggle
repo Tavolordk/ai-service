@@ -80,7 +80,7 @@ class LocalOllamaClient:
             if conn:
                 conn.close()
 
-    def stream_chat(self, messages: list[dict[str, str]], *, thinking: bool = False) -> Iterable[str]:
+    def stream_chat(self, messages: list[dict[str, str]]) -> Iterable[str]:
         if not self.settings.llm_enabled:
             raise LocalLlmError('LLM local deshabilitado.')
 
@@ -89,7 +89,7 @@ class LocalOllamaClient:
                 'model': self.settings.llm_model,
                 'messages': messages,
                 'stream': True,
-                'think': thinking,
+                'think': False,
                 'keep_alive': '10m',
                 'options': {
                     'temperature': self.settings.llm_temperature,
@@ -138,10 +138,6 @@ class LocalOllamaClient:
 
                 if item.get('error'):
                     raise LocalLlmError(str(item.get('error'))[:300])
-
-                # El razonamiento interno de Qwen3 (message.thinking) es privado.
-
-                # Sólo se transmite message.content al cliente.
 
                 message = item.get('message') or {}
                 content = message.get('content')
