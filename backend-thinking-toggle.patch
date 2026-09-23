@@ -1,0 +1,113 @@
+diff --git a/app/models.py b/app/models.py
+--- a/app/models.py
++++ b/app/models.py
+@@ -116,6 +116,7 @@ class ChatRequest(StrictPayloadModel):
+     selectedNode: GraphNodeInput | None = None
+     graph: GraphPayload | None = None
+     history: list[ChatHistoryMessage] = Field(default_factory=list, max_length=12)
++    thinking: bool = False
+ 
+ 
+ class ChatResponse(StrictPayloadModel):
+diff --git a/app/llm_local.py b/app/llm_local.py
+--- a/app/llm_local.py
++++ b/app/llm_local.py
+@@ -74,7 +74,7 @@ class LocalOllamaClient:
+         finally:
+             if conn:
+                 conn.close()
+-    def stream_chat(self, messages: list[dict[str, str]]) -> Iterable[str]:
++    def stream_chat(self, messages: list[dict[str, str]], *, thinking: bool = False) -> Iterable[str]:
+         if not self.settings.llm_enabled:
+             raise LocalLlmError('LLM local deshabilitado.')
+         payload = json.dumps(
+@@ -82,7 +82,7 @@ class LocalOllamaClient:
+                 'model': self.settings.llm_model,
+                 'messages': messages,
+                 'stream': True,
+-                'think': False,
++                'think': thinking,
+                 'keep_alive': '10m',
+                 'options': {
+                     'temperature': self.settings.llm_temperature,
+@@ -129,6 +129,8 @@ class LocalOllamaClient:
+                 if item.get('error'):
+                     raise LocalLlmError(str(item.get('error'))[:300])
+ 
++                # Ollama/Qwen3 puede devolver `message.thinking` cuando thinking=True.
++                # Ese canal es deliberadamente privado: sólo transmitimos la respuesta final.
+                 message = item.get('message') or {}
+                 content = message.get('content')
+                 if content:
+diff --git a/app/grounded_chat.py b/app/grounded_chat.py
+--- a/app/grounded_chat.py
++++ b/app/grounded_chat.py
+@@ -479,7 +479,9 @@ def build_system_prompt(
+ 13. Puedes hacer conteos o cálculos simples derivados de datos explícitos, pero indícalos como cálculo y no como un dato aportado por una fuente.
+ 14. El CONTEXTO VERIFICADO puede estar deliberadamente filtrado para la pregunta actual. No menciones registros omitidos por el filtro como si los hubieras revisado.
+ 15. En resúmenes amplios no recites todos los domicilios completos ni todos los vínculos uno por uno. Cuenta primero dónde aparecen, qué se repite y por qué vale la pena seguir ese hilo; da calle/número o listas completas sólo si el usuario las pide.
+ 16. Evita cerrar cada respuesta con advertencias largas. Si necesitas un matiz de precisión, intégralo en una sola frase natural.
++17. Responde SIEMPRE en español mexicano, incluso si el razonamiento interno del runtime ocurre en otro idioma.
++18. Nunca expongas razonamiento interno, cadena de pensamiento, deliberación, borradores ni etiquetas <think>. Entrega únicamente la respuesta final para el usuario.
+ FOCO DE ESTA PREGUNTA:
+ {_focus_instruction(request, plan)}
+ 
+@@ -546,12 +548,13 @@ class GroundedChatEngine:
+         yield {
+             'type': 'meta',
+             'mode': 'local-llm',
+             'model': self.settings.llm_model,
++            'thinking': request.thinking,
+         }
+         full_text = ''
+         try:
+             messages = build_messages(request, grounding, self.settings, plan)
+-            for chunk in self.llm.stream_chat(messages):
++            for chunk in self.llm.stream_chat(messages, thinking=request.thinking):
+                 full_text += chunk
+                 yield {'type': 'delta', 'text': chunk}
+             raw_text = full_text.strip()
+@@ -564,6 +567,7 @@ class GroundedChatEngine:
+                     'text': full_text,
+                     'mode': 'local-llm',
+                     'model': self.settings.llm_model,
++                    'thinking': request.thinking,
+                 }
+             yield {
+                 'type': 'done',
+@@ -571,6 +575,7 @@ class GroundedChatEngine:
+                 'mode': 'local-llm',
+                 'model': self.settings.llm_model,
+                 'evidence': [item.model_dump() for item in _cited_evidence(full_text, grounding)],
++                'thinking': request.thinking,
+                 'disclaimer': (
+                     'Respuesta generada localmente a partir del perfil, las fuentes y el grafo enviados a esta API. '
+                     'Las asociaciones del grafo no se interpretan como relaciones personales o delictivas sin evidencia explícita.'
+@@ -590,12 +595,14 @@ class GroundedChatEngine:
+                 'text': fallback_text,
+                 'mode': 'deterministic-fallback',
+                 'model': None,
++                'thinking': False,
+             }
+             yield {
+                 'type': 'done',
+                 'mode': 'deterministic-fallback',
+                 'model': None,
+                 'evidence': [item.model_dump() for item in deterministic.evidence],
++                'thinking': False,
+                 'disclaimer': (
+                     'El modelo generativo local no estaba disponible. Se respondió con el analizador determinista local; '
+                     'ningún dato fue enviado a servicios externos.'
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -191,6 +191,8 @@ La configuración incluida usa:
+ 
+   * Ollama 0.32.9 como runtime local.
+   * Qwen3 4B (`qwen3:4b`) como modelo conversacional.
+-  * `think=false` para obtener una respuesta directa en vez de mostrar razonamiento interno.
++  * `thinking=true|false` en cada request para activar o desactivar el razonamiento de Qwen3 desde el frontend.
++  * El razonamiento interno nunca se envía al navegador: la API descarta `message.thinking` y transmite únicamente `message.content`.
++  * Si el cliente no envía `thinking`, el valor por compatibilidad es `false`.
+ 
+ El modelo de Ollama ocupa aproximadamente 2.5 GB. Puede trabajar por CPU; con GPU compatible la generación será más rápida.
