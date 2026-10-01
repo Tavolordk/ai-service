@@ -1,0 +1,39 @@
+services:
+  ollama:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    container_name: spm-ollama-local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"
+    environment:
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+    volumes:
+      - spm-ollama-models:/root/.ollama
+    networks:
+      - spm-ai
+
+  profile-intelligence-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: spm-profile-intelligence-api:4.0.0-hybrid-router
+    container_name: profile-intelligence-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${API_PORT:-3651}:8080"
+    volumes:
+      - ./data/cases:/data/cases
+    depends_on:
+      - ollama
+    networks:
+      - spm-ai
+
+volumes:
+  spm-ollama-models:
+    name: spm-ollama-models
+
+networks:
+  spm-ai:
+    name: spm-ai-local

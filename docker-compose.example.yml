@@ -1,0 +1,27 @@
+services:
+  profile-intelligence-api:
+    build: .
+    image: profile-intelligence-api:3.0.0
+    container_name: profile-intelligence-api
+    restart: unless-stopped
+    ports:
+      - "3651:8080"
+    environment:
+      AI_DATA_DIR: /data
+      AI_LLM_ENABLED: "true"
+      AI_LLM_BASE_URL: http://ollama:11434
+      AI_LLM_MODEL: qwen3:4b
+      AI_LLM_TIMEOUT_SECONDS: "300"
+      AI_LLM_TEMPERATURE: "0.10"
+      AI_LLM_MAX_PREDICT: "1200"
+      AI_LLM_NUM_CTX: "32768"
+      AI_MAX_CASE_BYTES: "1073741824"
+      AI_CONTEXT_MAX_CHARS: "60000"
+      AI_DEEP_MAX_CHUNKS: "5000"
+      AI_ALLOWED_ORIGINS: http://10.241.136.20:3500,http://localhost:4200
+    volumes:
+      - profile-intelligence-data:/data
+    # Debe compartir la misma red Docker que el servicio Ollama con alias "ollama".
+
+volumes:
+  profile-intelligence-data:

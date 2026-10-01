@@ -1,29 +1,54 @@
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = "Stop"
 
-Write-Host 'Recreando servicios de IA sin borrar el volumen de modelos...' -ForegroundColor Cyan
-docker compose down
+$ComposeFile = ".\docker-compose.local.yml"
+$EnvFile = ".\.env"
+$Model = "qwen3:4b"
 
-Write-Host 'Iniciando Ollama local...' -ForegroundColor Cyan
-docker compose up -d ollama
-
-Write-Host 'Habilitando salida temporal SOLO para descargar el modelo...' -ForegroundColor Yellow
-$alreadyConnected = docker inspect profile-intelligence-ollama --format '{{json .NetworkSettings.Networks}}' | Select-String '"bridge"'
-if (-not $alreadyConnected) {
-  docker network connect bridge profile-intelligence-ollama
+function Invoke-Compose {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
+    & docker compose -f $ComposeFile --env-file $EnvFile @Args
+    if ($LASTEXITCODE -ne 0) {
+        throw "docker compose falló (exit=$LASTEXITCODE): $($Args -join ' ')"
+    }
 }
 
-try {
-  Write-Host 'Descargando Qwen3 4B (Apache-2.0). Esto se hace una sola vez y NO envía perfiles.' -ForegroundColor Cyan
-  docker exec profile-intelligence-ollama ollama pull qwen3:4b
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    throw "Docker no está disponible en PATH. Abre Docker Desktop y vuelve a ejecutar."
 }
-finally {
-  Write-Host 'Quitando de nuevo la salida temporal de Ollama...' -ForegroundColor Yellow
-  docker network disconnect bridge profile-intelligence-ollama 2>$null
+if (-not (Test-Path $ComposeFile)) {
+    throw "No existe $ComposeFile. Ejecuta este script desde la raíz del proyecto."
+}
+if (-not (Test-Path $EnvFile)) {
+    Copy-Item ".\.env.example" $EnvFile
+    Write-Host "Se creó .env desde .env.example"
 }
 
-Write-Host 'Modelo instalado. Levantando la API privada...' -ForegroundColor Green
-docker compose up -d --build --force-recreate
+Write-Host "Usando EXCLUSIVAMENTE: $ComposeFile" -ForegroundColor Cyan
+Invoke-Compose up -d ollama
 
-Write-Host 'Listo. Prueba:' -ForegroundColor Green
-Write-Host '  curl.exe http://127.0.0.1:8080/health'
-Write-Host '  curl.exe http://127.0.0.1:8080/health/llm'
+Write-Host "Modelos actualmente instalados:" -ForegroundColor Cyan
+$list = & docker compose -f $ComposeFile --env-file $EnvFile exec -T ollama ollama list
+if ($LASTEXITCODE -ne 0) {
+    throw "No fue posible consultar Ollama dentro del contenedor."
+}
+$list | Write-Host
+
+if (($list -join "`n") -match [regex]::Escape($Model)) {
+    Write-Host "$Model ya está instalado. No se descargará de nuevo." -ForegroundColor Green
+    exit 0
+}
+
+Write-Host "El modelo $Model NO está instalado." -ForegroundColor Yellow
+Write-Host "Intentando descargarlo desde registry.ollama.ai..." -ForegroundColor Yellow
+& docker compose -f $ComposeFile --env-file $EnvFile exec -T ollama ollama pull $Model
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "" 
+    Write-Host "ERROR: no se pudo descargar $Model." -ForegroundColor Red
+    Write-Host "Tu red/DNS corporativo está bloqueando registry.ollama.ai." -ForegroundColor Red
+    Write-Host "La API puede construirse, pero el chatbot no responderá hasta que el modelo exista en el volumen spm-ollama-models." -ForegroundColor Yellow
+    Write-Host "Si tienes el modelo en otro equipo/servidor, usa import-model-volume.ps1 después de copiar un tar de /root/.ollama/models." -ForegroundColor Yellow
+    exit 20
+}
+
+Write-Host "Modelo instalado correctamente:" -ForegroundColor Green
+Invoke-Compose exec -T ollama ollama list

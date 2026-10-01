@@ -1,171 +1,158 @@
-# Profile Intelligence API 2.1 — chat preciso
+# SPM IA Agent API — 4.0.0 hybrid-router
 
-Microservicio local para analizar perfiles/grafos y conversar sobre ellos con un modelo generativo **local**, sin cambiar ni reenviar los requests/responses de las APIs de negocio existentes.
+Versión optimizada para equipos con pocos recursos. El cambio principal es que las preguntas simples ya **no llaman a Qwen**. La API primero intenta resolverlas de forma determinista usando el perfil estructurado y el grafo que ya envía el frontend; sólo las preguntas analíticas pasan al LLM.
 
-## Qué cambia en 2.1
-
-El endpoint determinista sigue existiendo, pero el chat del frontend ahora usa:
+## Flujo nuevo
 
 ```text
-POST /api/v1/intelligence/chat/stream
+Pregunta
+  |
+  v
+SPM Fast Router
+  |-- CURP/RFC/CUIP/CIB -----------------> respuesta inmediata
+  |-- nombre/fecha nacimiento/sexo ------> respuesta inmediata
+  |-- domicilios ------------------------> respuesta inmediata
+  |-- vehículos/armas/personas ----------> respuesta inmediata
+  |-- conteos de nodos/vínculos ---------> respuesta inmediata
+  |-- fuentes/orígenes ------------------> respuesta inmediata
+  |-- resumen del perfil ----------------> resumen determinista rápido
+  |
+  `-- análisis/patrones/hipótesis/etc. --> Context Builder --> Qwen3:4b
 ```
 
-La respuesta llega por streaming, por lo que el texto aparece progresivamente como en un chatbot. La conversación mantiene hasta 8 mensajes recientes en memoria del navegador y cada pregunta vuelve a construir el contexto a partir del perfil, sus orígenes y el grafo visible.
+El frontend actual no necesita cambios: las respuestas rápidas usan el modo ya soportado `deterministic-fallback` y se presentan como **Modo exacto local**.
 
-
-### Selección de contexto por intención
-
-Antes de llamar a Qwen se crea un `QueryPlan`. El objetivo es que el modelo no reciba datos que no necesita para una pregunta puntual.
+## Preguntas que evitan Qwen
 
 Ejemplos:
 
-- `Dame la primera dirección` -> una sola evidencia de dirección.
-- `¿Y la segunda?` -> usa el turno anterior sólo para resolver que sigue hablando de direcciones y recupera únicamente la segunda.
-- `¿Cuál es su fecha de nacimiento?` -> sólo el campo equivalente, aun si el código recibido es `FECHANACIMIENTO`.
-- `¿Qué reporta SRC1?` -> sólo campos/direcciones cuyo `origin.sourceCode` sea `SRC1`.
-- `¿Qué relación tiene el nodo seleccionado?` -> nodo seleccionado + aristas directas + nodos conectados directamente.
+- `dame un resumen del perfil`
+- `cuál es su CURP`
+- `cuál es su RFC`
+- `cuál es su nombre`
+- `cuál es su fecha de nacimiento`
+- `dame sus domicilios`
+- `cuántos domicilios tiene`
+- `qué vehículos tiene`
+- `cuántos vehículos tiene relacionados`
+- `qué armas aparecen`
+- `cuántos vínculos hay`
+- `cuántos elementos relacionados hay`
+- `qué fuentes tiene`
 
-El historial sirve para resolver referencias conversacionales, no se concatena indiscriminadamente a la búsqueda de evidencia.
+Preguntas como `analiza patrones`, `propón hipótesis`, `compara inconsistencias`, `qué relación es más relevante` o el modo `deep` siguen usando Qwen3:4b.
 
-## Modelo local
+Aunque el usuario tenga activado **Razonar**, una pregunta factual que el router puede responder exactamente no invoca al modelo ni muestra estado de razonamiento. Esto evita consumir CPU sin aportar valor.
 
-La configuración incluida usa:
+## Rendimiento del router
 
-- Ollama 0.32.9 como runtime local.
-- Qwen3 4B (`qwen3:4b`) como modelo conversacional.
-- `think=false` para obtener una respuesta directa en vez de mostrar razonamiento interno.
+Prueba sintética local con un perfil de ~1.27 MB y 9,000 registros auxiliares:
 
-El modelo de Ollama ocupa aproximadamente 2.5 GB. Puede trabajar por CPU; con GPU compatible la generación será más rápida.
+```text
+dame un resumen del perfil            ~136 ms
+cual es su curp                       ~0.3 ms
+cuantos vehiculos tiene relacionados  ~0.2 ms
+```
 
-## Instalación inicial del modelo en Windows
+Estos números miden sólo el procesamiento de la API en el entorno de prueba; el tiempo real dependerá del equipo, tamaño del JSON y red. Lo importante es que esas rutas no esperan inferencia de Ollama.
 
-Desde `ai-service` ejecuta **una sola vez**:
+## Timeout de respaldo
+
+Se mantienen timeouts amplios para las preguntas que sí llegan al LLM:
+
+```env
+AI_LLM_TIMEOUT_SECONDS=1200
+AI_LLM_CONNECT_TIMEOUT_SECONDS=30
+AI_LLM_FIRST_TOKEN_TIMEOUT_SECONDS=1200
+AI_LLM_STREAM_IDLE_TIMEOUT_SECONDS=600
+AI_LLM_FINAL_TIMEOUT_SECONDS=1800
+```
+
+Por tanto, la optimización no depende de reducir el timeout: primero se evita Qwen cuando es innecesario y, cuando sí se necesita, queda margen para CPU lenta.
+
+## Variables nuevas
+
+```env
+AI_FAST_PATH_ENABLED=true
+AI_FAST_SUMMARY_ENABLED=true
+AI_FAST_MAX_LIST_ITEMS=12
+```
+
+- `AI_FAST_PATH_ENABLED=false`: desactiva completamente el router y fuerza el comportamiento LLM anterior.
+- `AI_FAST_SUMMARY_ENABLED=false`: los datos puntuales siguen siendo rápidos, pero `resumen del perfil` vuelve a Qwen.
+- `AI_FAST_MAX_LIST_ITEMS`: máximo de elementos que lista una respuesta rápida.
+
+## Context Builder y caché
+
+Para preguntas analíticas se conserva la optimización 3.2.0:
+
+- no se envía el JSON gigante en bruto;
+- se clasifica la intención;
+- se seleccionan sólo secciones relevantes;
+- se deduplican datos repetidos;
+- el snapshot del perfil queda en caché;
+- el presupuesto de contexto/tokens se ajusta según la pregunta.
+
+## Health
 
 ```powershell
-.\setup-local-model.cmd
+curl.exe http://localhost:3651/health
 ```
 
-O con PowerShell:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\setup-local-model.ps1
-```
-
-El script hace lo siguiente:
-
-1. detiene la versión previa sin borrar el volumen de modelos;
-2. inicia únicamente Ollama;
-3. le habilita salida de red temporalmente;
-4. descarga `qwen3:4b`;
-5. vuelve a quitar esa salida de red;
-6. levanta Ollama + la API de inteligencia.
-
-La descarga inicial necesita Internet **sólo para obtener los pesos del modelo**. En ese momento la API que recibe perfiles todavía no está levantada y no se envían datos del sistema.
-
-Después de esa descarga, el arranque normal es:
-
-```powershell
-docker compose up -d --build
-```
-
-## Comprobar
-
-```powershell
-curl.exe http://127.0.0.1:8080/health
-```
-
-Respuesta esperada:
-
-```json
-{"status":"ok","mode":"local-private-chat","model":"qwen3:4b"}
-```
-
-Comprobar específicamente el modelo:
-
-```powershell
-curl.exe http://127.0.0.1:8080/health/llm
-```
-
-Debe indicar:
+Ahora incluye estadísticas del router:
 
 ```json
 {
-  "status": "ok",
-  "runtimeReachable": true,
-  "modelAvailable": true,
-  "model": "qwen3:4b"
+  "contextOptimization": true,
+  "contextCache": {
+    "entries": 1,
+    "hits": 3,
+    "misses": 1
+  },
+  "fastPath": {
+    "hits": 12,
+    "misses": 4,
+    "llmRequestsAvoided": 12,
+    "routes": {
+      "summary:deterministic": 2,
+      "identifier:curp": 4,
+      "graph:vehicle": 6
+    }
+  }
 }
 ```
 
-Si `modelAvailable` aparece en `false`, ejecuta nuevamente el script de instalación del modelo.
+`llmRequestsAvoided` permite comprobar cuántas consultas no gastaron inferencia.
 
-## Privacidad por diseño
+## Levantar local
 
-- No se usa OpenAI, Gemini, Claude, Hugging Face Inference API, AWS Bedrock, Azure AI ni otro servicio de IA remoto.
-- Ollama **no publica el puerto 11434 hacia Windows ni hacia la LAN**; sólo la API de inteligencia puede verlo en una red Docker interna.
-- La API de inteligencia sólo se publica en `127.0.0.1:8080`.
-- El cliente LLM valida `AI_LLM_BASE_URL` contra una allowlist. En Compose sólo se permite el hostname interno `ollama`.
-- No hay SDK cloud, telemetría ni clientes HTTP de terceros. La conexión local a Ollama usa `http.client` de la biblioteca estándar de Python.
-- Uvicorn arranca con `--no-access-log` y la aplicación no registra prompts ni payloads.
-- La API rechaza `Authorization` y `Cookie`; el JWT del sistema principal no debe llegar a IA.
-- CORS está limitado a los puertos locales configurados y `allow_credentials=false`.
-- Las respuestas llevan `Cache-Control: no-store`.
-- Swagger/OpenAPI están apagados por defecto.
-- La conversación no se persiste en base de datos, archivo, localStorage ni volumen. El frontend conserva el historial únicamente en memoria mientras la pantalla está abierta.
-
-## Grounding / exactitud
-
-El modelo **no recibe libertad para consultar Internet ni completar el perfil con conocimiento general**. Antes de cada pregunta la API construye un contexto verificable con:
-
-- datos del perfil y sus códigos de fuente;
-- direcciones y fuentes que las reportan;
-- registros de origen;
-- nodos que Angular ya está mostrando;
-- aristas visibles del grafo;
-- nodo seleccionado;
-- hasta 8 mensajes previos de la conversación.
-
-Se selecciona la evidencia más relevante a la pregunta y se le asignan marcadores `[E1]`, `[E2]`, etc. El prompt obliga al modelo a citar esos marcadores en afirmaciones factuales. El frontend permite desplegar la evidencia detrás de cada respuesta.
-
-Si la respuesta no está en los datos, la instrucción es contestar que **no aparece en las fuentes proporcionadas** en lugar de inventarla.
-
-La entrada de datos también se trata como contenido no confiable: cualquier texto que parezca una instrucción dentro de un nombre, domicilio, fuente o nodo se considera dato y no prompt.
-
-## Fallback
-
-Si Ollama no está arriba o el modelo no está instalado:
-
-```text
-chat -> analizador determinista local
+```powershell
+docker compose -f .\docker-compose.local.yml --env-file .\.env down
+docker compose -f .\docker-compose.local.yml --env-file .\.env build --no-cache profile-intelligence-api
+docker compose -f .\docker-compose.local.yml --env-file .\.env up -d --force-recreate
 ```
 
-El perfil y el grafo continúan funcionando y no se llama a ningún proveedor externo.
+Verifica:
 
-## Endpoints independientes del gateway
-
-```text
-GET  /health
-GET  /health/llm
-POST /api/v1/intelligence/profile/analyze
-POST /api/v1/intelligence/profile/answer      # compatibilidad/fallback determinista
-POST /api/v1/intelligence/chat                # respuesta completa
-POST /api/v1/intelligence/chat/stream         # chatbot incremental (frontend)
-POST /api/v1/intelligence/graph/analyze
+```powershell
+docker ps
+curl.exe http://localhost:3651/health
 ```
 
-Ninguno se integra al gateway actual.
+La imagen esperada es:
 
-## Variables principales
+```text
+spm-profile-intelligence-api:4.0.0-hybrid-router
+```
 
-- `AI_ALLOWED_ORIGINS`
-- `AI_ALLOWED_HOSTS`
-- `AI_ENABLE_DOCS=false`
-- `AI_MAX_CONTENT_LENGTH=5242880`
-- `AI_LLM_ENABLED=true`
-- `AI_LLM_BASE_URL=http://ollama:11434`
-- `AI_LLM_ALLOWED_HOSTS=ollama`
-- `AI_LLM_MODEL=qwen3:4b`
-- `AI_LLM_TEMPERATURE=0.15`
-- `AI_LLM_MAX_PREDICT=900`
-- `AI_LLM_MAX_EVIDENCE=72`
-- `AI_LLM_HISTORY_MESSAGES=8`
+## Pruebas
+
+```text
+25 passed
+```
+
+Incluyen clasificación de contexto, streaming, filtros de razonamiento, presupuestos de runtime y rutas rápidas de CURP, domicilios, vehículos, fuentes, resumen y preguntas analíticas que deben caer al LLM.
+
+## Sobre entrenar un modelo pequeño
+
+Esta versión ataca primero el problema que más tiempo desperdicia: usar un LLM para recuperar datos que ya están estructurados. Un modelo pequeño especializado puede añadirse después para redacción más libre de resúmenes, pero no es necesario para obtener respuesta inmediata en consultas factuales. Mantener esta separación también reduce el riesgo de que un modelo invente un CURP, RFC, conteo o domicilio que la API puede leer exactamente.

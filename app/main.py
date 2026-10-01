@@ -1,160 +1,195 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, Request, status
-from fastapi.exceptions import RequestValidationError
+import json
+from collections.abc import Iterable
+
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from .analyzer import ExactGraphAnalyzer, ExactProfileAnalyzer
+from .analyzer import PoliceAnalyzer
+from .case_store import CaseStore
 from .config import settings
-from .grounded_chat import GroundedChatEngine, encode_sse
-from .llm_local import LocalOllamaClient
-from .models import (
-    AnalysisResponse,
-    AnswerRequest,
-    AnswerResponse,
-    ChatRequest,
-    ChatResponse,
-    GraphAnalysisResponse,
-    GraphPayload,
-    ProfilePayload,
-)
+from .models import CaseChatRequest, ChatRequest, ChatResponse
+from .ollama_client import LlmStreamChunk, LocalLlmError, LocalOllamaClient
 
 app = FastAPI(
-    title='Profile Intelligence API',
-    version='2.0.0',
-    description='Análisis y chat local, privado y basado exclusivamente en evidencia recibida.',
-    docs_url='/docs' if settings.enable_docs else None,
-    redoc_url='/redoc' if settings.enable_docs else None,
-    openapi_url='/openapi.json' if settings.enable_docs else None,
+    title=settings.app_name,
+    version=settings.app_version,
+    docs_url="/docs" if settings.enable_docs else None,
+    redoc_url="/redoc" if settings.enable_docs else None,
+    openapi_url="/openapi.json" if settings.enable_docs else None,
 )
 
-app.add_middleware(
-    TrustedHostMiddleware,
-    allowed_hosts=list(settings.allowed_hosts),
-)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.allowed_origins),
-    allow_credentials=False,
-    allow_methods=['GET', 'POST', 'OPTIONS'],
-    allow_headers=['Content-Type', 'X-Trace-Id'],
-    max_age=600,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
 )
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.allowed_hosts) + ["*"] if "*" in settings.allowed_hosts else list(settings.allowed_hosts))
 
-profile_analyzer = ExactProfileAnalyzer()
-graph_analyzer = ExactGraphAnalyzer()
-llm_client = LocalOllamaClient(settings)
-chat_engine = GroundedChatEngine(settings, llm_client)
-
-
-@app.exception_handler(RequestValidationError)
-async def validation_error_handler(_: Request, exc: RequestValidationError):
-    # No devolvemos el valor de entrada (`input`) que FastAPI incluye por defecto,
-    # porque podría contener CURP, RFC, domicilios u otros datos del perfil.
-    errors = [
-        {
-            'field': '.'.join(str(part) for part in error.get('loc', []) if part != 'body'),
-            'type': error.get('type', 'validation_error'),
-        }
-        for error in exc.errors()
-    ]
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={'detail': 'Payload inválido.', 'errors': errors},
-    )
+case_store = CaseStore(settings)
+llm = LocalOllamaClient(settings)
+analyzer = PoliceAnalyzer(settings, llm, case_store)
 
 
-@app.middleware('http')
-async def privacy_and_security_middleware(request: Request, call_next):
-    # El servicio es deliberadamente independiente del sistema de autenticación actual.
-    # Rechazar estas cabeceras evita que un JWT/cookie del sistema llegue por accidente.
-    if request.headers.get('authorization') or request.headers.get('cookie'):
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={'detail': 'No envíe credenciales del sistema a la API de inteligencia.'},
-        )
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-    content_length = request.headers.get('content-length')
-    if content_length:
+
+def _content_text(chunks: Iterable[LlmStreamChunk]) -> str:
+    full = ""
+    for chunk in chunks:
+        if chunk.kind == "content":
+            full += chunk.text
+        elif chunk.kind == "replace":
+            full = chunk.text
+    return full.strip()
+
+
+def _stream_response(*, evidence: list[dict], chunks: Iterable[LlmStreamChunk], thinking: bool, mode: str, model: str | None, route: str):
+    def generate():
+        yield _sse("meta", {
+            "type": "meta",
+            "mode": mode,
+            "model": model,
+            "thinking": thinking,
+            "route": route,
+        })
+        full = ""
         try:
-            if int(content_length) > settings.max_content_length:
-                return JSONResponse(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    content={'detail': 'Payload demasiado grande.'},
-                )
-        except ValueError:
-            return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content={'detail': 'Content-Length inválido.'},
-            )
+            for chunk in chunks:
+                # El razonamiento nunca sale por SSE. En modo directo, si al final se
+                # detecta idioma incorrecto o truncamiento, la API sustituye la salida
+                # provisional por una respuesta final validada mediante `replace`.
+                if chunk.kind == "reasoning":
+                    continue
+                if chunk.kind == "replace":
+                    full = chunk.text
+                    yield _sse("replace", {
+                        "type": "replace",
+                        "text": chunk.text,
+                        "mode": mode,
+                        "model": model,
+                        "thinking": thinking,
+                    })
+                    continue
+                full += chunk.text
+                yield _sse("delta", {"type": "delta", "text": chunk.text})
 
-    response = await call_next(request)
-    response.headers['Cache-Control'] = 'no-store, max-age=0'
-    response.headers['Pragma'] = 'no-cache'
-    response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['X-Frame-Options'] = 'DENY'
-    response.headers['Referrer-Policy'] = 'no-referrer'
-    response.headers['Content-Security-Policy'] = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
-    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
-    return response
-
-
-@app.get('/health')
-def health() -> dict[str, str]:
-    return {
-        'status': 'ok',
-        'mode': 'local-private-chat',
-        'model': settings.llm_model if settings.llm_enabled else 'disabled',
-    }
-
-
-@app.get('/health/llm')
-def health_llm() -> dict[str, str | bool]:
-    state = llm_client.status()
-    return {
-        'status': 'ok' if state.reachable and state.model_available else 'degraded',
-        'runtimeReachable': state.reachable,
-        'modelAvailable': state.model_available,
-        'model': settings.llm_model,
-        'detail': state.detail,
-    }
-
-
-@app.post('/api/v1/intelligence/profile/analyze', response_model=AnalysisResponse)
-def analyze_profile(profile: ProfilePayload) -> AnalysisResponse:
-    return profile_analyzer.analyze(profile)
-
-
-@app.post('/api/v1/intelligence/profile/answer', response_model=AnswerResponse)
-def answer_profile(request: AnswerRequest) -> AnswerResponse:
-    # Se conserva el endpoint determinista por compatibilidad/fallback.
-    return profile_analyzer.answer(request.question, request.profile, request.selectedNode, request.graph)
-
-
-@app.post('/api/v1/intelligence/chat', response_model=ChatResponse)
-def chat(request: ChatRequest) -> ChatResponse:
-    return chat_engine.complete(request)
-
-
-@app.post('/api/v1/intelligence/chat/stream')
-def chat_stream(request: ChatRequest) -> StreamingResponse:
-    def events():
-        for event in chat_engine.stream(request):
-            yield encode_sse(event)
+            yield _sse("done", {
+                "type": "done",
+                "text": full.strip(),
+                "mode": mode,
+                "model": model,
+                "thinking": thinking,
+                "route": route,
+                "evidence": evidence[: settings.llm_max_evidence],
+            })
+        except LocalLlmError as exc:
+            yield _sse("error", {"type": "error", "message": str(exc)})
 
     return StreamingResponse(
-        events(),
-        media_type='text/event-stream',
+        generate(),
+        media_type="text/event-stream",
         headers={
-            'Cache-Control': 'no-store, max-age=0',
-            'X-Accel-Buffering': 'no',
-            'Connection': 'keep-alive',
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
         },
     )
 
 
-@app.post('/api/v1/intelligence/graph/analyze', response_model=GraphAnalysisResponse)
-def analyze_graph(graph: GraphPayload) -> GraphAnalysisResponse:
-    return graph_analyzer.analyze(graph)
+@app.get("/")
+def root():
+    return {
+        "service": settings.app_name,
+        "version": settings.app_version,
+        "model": settings.llm_model,
+        "status": "ok",
+    }
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "model": settings.llm_model,
+        "llmEnabled": settings.llm_enabled,
+        "caseLimitBytes": settings.max_case_bytes,
+        "contextOptimization": True,
+        "contextCache": analyzer.cache_stats(),
+        "fastPath": analyzer.fast_path_stats(),
+        "maxContextChars": settings.context_max_chars,
+        "maxContextWindow": settings.llm_num_ctx,
+    }
+
+
+@app.post("/api/v1/intelligence/chat/stream")
+def intelligence_chat_stream(request: ChatRequest):
+    analysis = analyzer.stream_inline(request)
+    return _stream_response(
+        evidence=analysis.evidence, chunks=analysis.chunks, thinking=analysis.thinking,
+        mode=analysis.mode, model=analysis.model, route=analysis.route,
+    )
+
+
+@app.post("/api/v1/intelligence/chat", response_model=ChatResponse)
+def intelligence_chat(request: ChatRequest):
+    analysis = analyzer.stream_inline(request)
+    try:
+        text = _content_text(analysis.chunks)
+    except LocalLlmError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return ChatResponse(
+        text=text,
+        mode=analysis.mode,
+        model=analysis.model,
+        thinking=analysis.thinking,
+        evidence=analysis.evidence[: settings.llm_max_evidence],
+    )
+
+
+@app.post("/api/v1/cases")
+async def ingest_case(request: Request, caseId: str = Query(min_length=1, max_length=120)):
+    metadata = await case_store.ingest(caseId, request)
+    return metadata.model_dump()
+
+
+@app.get("/api/v1/cases/{case_id}")
+def get_case(case_id: str):
+    return case_store.metadata(case_id).model_dump()
+
+
+@app.delete("/api/v1/cases/{case_id}", status_code=204)
+def delete_case(case_id: str):
+    case_store.delete(case_id)
+    return JSONResponse(status_code=204, content=None)
+
+
+@app.post("/api/v1/cases/{case_id}/chat/stream")
+def case_chat_stream(case_id: str, request: CaseChatRequest):
+    analysis = analyzer.stream_case(case_id, request)
+    return _stream_response(
+        evidence=analysis.evidence, chunks=analysis.chunks, thinking=analysis.thinking,
+        mode=analysis.mode, model=analysis.model, route=analysis.route,
+    )
+
+
+@app.post("/api/v1/cases/{case_id}/chat", response_model=ChatResponse)
+def case_chat(case_id: str, request: CaseChatRequest):
+    analysis = analyzer.stream_case(case_id, request)
+    try:
+        text = _content_text(analysis.chunks)
+    except LocalLlmError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return ChatResponse(
+        text=text,
+        mode=analysis.mode,
+        model=analysis.model,
+        thinking=analysis.thinking,
+        evidence=analysis.evidence[: settings.llm_max_evidence],
+    )
