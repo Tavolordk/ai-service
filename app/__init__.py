@@ -1,1 +1,1 @@
-__version__ = "4.0.0-hybrid-router"
+"""SPM IA Agent API."""

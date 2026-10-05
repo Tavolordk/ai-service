@@ -16,7 +16,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: spm-profile-intelligence-api:4.0.2-spanish-reasoning
+    image: spm-profile-intelligence-api:4.0.4-reasoning-recovery
     container_name: profile-intelligence-api
     restart: unless-stopped
     env_file:

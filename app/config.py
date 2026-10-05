@@ -39,7 +39,7 @@ def _csv(name: str, default: str) -> tuple[str, ...]:
 @dataclass(frozen=True)
 class Settings:
     app_name: str = os.getenv("AI_APP_NAME", "SPM IA Agent API")
-    app_version: str = os.getenv("AI_APP_VERSION", "4.0.2-spanish-reasoning")
+    app_version: str = os.getenv("AI_APP_VERSION", "4.0.4-reasoning-recovery")
     host: str = os.getenv("AI_HOST", "0.0.0.0")
     port: int = _int("AI_PORT", 8080)
     enable_docs: bool = _bool("AI_ENABLE_DOCS", True)
@@ -61,7 +61,6 @@ class Settings:
     llm_temperature: float = _float("AI_LLM_TEMPERATURE", 0.10)
     llm_num_ctx: int = _int("AI_LLM_NUM_CTX", 12288)
     llm_max_predict: int = _int("AI_LLM_MAX_PREDICT", 2400)
-    # AI_LLM_TIMEOUT_SECONDS se conserva por compatibilidad con despliegues anteriores.
     llm_timeout_seconds: int = _int("AI_LLM_TIMEOUT_SECONDS", 1200)
     llm_connect_timeout_seconds: int = _int("AI_LLM_CONNECT_TIMEOUT_SECONDS", 30)
     llm_first_token_timeout_seconds: int = _int("AI_LLM_FIRST_TOKEN_TIMEOUT_SECONDS", 1200)
@@ -71,12 +70,10 @@ class Settings:
     llm_max_evidence: int = _int("AI_LLM_MAX_EVIDENCE", 72)
     llm_keep_alive: str = os.getenv("AI_LLM_KEEP_ALIVE", "30m")
 
-    # Router híbrido: resuelve consultas factuales y resúmenes frecuentes sin invocar Qwen.
     fast_path_enabled: bool = _bool("AI_FAST_PATH_ENABLED", True)
     fast_summary_enabled: bool = _bool("AI_FAST_SUMMARY_ENABLED", True)
     fast_max_list_items: int = _int("AI_FAST_MAX_LIST_ITEMS", 12)
 
-    # Presupuestos compactos: el JSON completo se reduce antes de llegar al LLM.
     context_max_chars: int = _int("AI_CONTEXT_MAX_CHARS", 14000)
     context_deep_max_chars: int = _int("AI_CONTEXT_DEEP_MAX_CHARS", 28000)
     context_max_facts_per_section: int = _int("AI_CONTEXT_MAX_FACTS_PER_SECTION", 28)
