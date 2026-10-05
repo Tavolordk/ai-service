@@ -40,6 +40,37 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+
+
+def _frontend_evidence(items: list[dict]) -> list[dict]:
+    kind_by_section = {
+        "addresses": "address",
+        "sources": "origin",
+        "relations": "relation",
+        "vehicles": "node",
+        "weapons": "node",
+        "identity": "data",
+        "identifiers": "data",
+    }
+    out: list[dict] = []
+    for index, item in enumerate(items or []):
+        if not isinstance(item, dict):
+            continue
+        section = str(item.get("section") or "data")
+        path = str(item.get("path") or "")
+        value = item.get("value")
+        raw_kind = str(item.get("kind") or "")
+        kind = raw_kind if raw_kind in {"profile", "data", "address", "origin", "node", "relation"} else kind_by_section.get(section, "data")
+        source_codes = item.get("sourceCodes") if isinstance(item.get("sourceCodes"), list) else []
+        out.append({
+            "kind": kind,
+            "id": str(item.get("id") or path or f"evidence-{index}"),
+            "label": str(item.get("label") or section or path or f"Evidencia {index + 1}"),
+            "value": "" if value is None else str(value),
+            "sourceCodes": [str(code) for code in source_codes if code is not None],
+        })
+    return out
+
 def _content_text(chunks: Iterable[LlmStreamChunk]) -> str:
     full = ""
     for chunk in chunks:
@@ -87,7 +118,7 @@ def _stream_response(*, evidence: list[dict], chunks: Iterable[LlmStreamChunk], 
                 "model": model,
                 "thinking": thinking,
                 "route": route,
-                "evidence": evidence[: settings.llm_max_evidence],
+                "evidence": _frontend_evidence(evidence[: settings.llm_max_evidence]),
             })
         except LocalLlmError as exc:
             yield _sse("error", {"type": "error", "message": str(exc)})
@@ -149,7 +180,7 @@ def intelligence_chat(request: ChatRequest):
         mode=analysis.mode,
         model=analysis.model,
         thinking=analysis.thinking,
-        evidence=analysis.evidence[: settings.llm_max_evidence],
+        evidence=_frontend_evidence(analysis.evidence[: settings.llm_max_evidence]),
     )
 
 
@@ -191,5 +222,5 @@ def case_chat(case_id: str, request: CaseChatRequest):
         mode=analysis.mode,
         model=analysis.model,
         thinking=analysis.thinking,
-        evidence=analysis.evidence[: settings.llm_max_evidence],
+        evidence=_frontend_evidence(analysis.evidence[: settings.llm_max_evidence]),
     )

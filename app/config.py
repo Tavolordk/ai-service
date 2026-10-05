@@ -39,7 +39,7 @@ def _csv(name: str, default: str) -> tuple[str, ...]:
 @dataclass(frozen=True)
 class Settings:
     app_name: str = os.getenv("AI_APP_NAME", "SPM IA Agent API")
-    app_version: str = os.getenv("AI_APP_VERSION", "4.0.0-hybrid-router")
+    app_version: str = os.getenv("AI_APP_VERSION", "4.0.2-spanish-reasoning")
     host: str = os.getenv("AI_HOST", "0.0.0.0")
     port: int = _int("AI_PORT", 8080)
     enable_docs: bool = _bool("AI_ENABLE_DOCS", True)

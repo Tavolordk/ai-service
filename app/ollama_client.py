@@ -191,10 +191,40 @@ class LocalOllamaClient:
     ) -> bytes:
         runtime_messages = [dict(m) for m in messages]
         directive = "/think" if thinking else "/no_think"
+
+        # Language lock: Qwen receives the language constraint at system level before
+        # any user/context text. This also applies to Ollama's private textual
+        # `thinking`/`reasoning` channel when thinking=True. The private channel is
+        # still consumed server-side and never exposed over SSE.
+        language_lock = (
+            "IDIOMA ÚNICO DE GENERACIÓN: español mexicano. "
+            "Si generas thinking/reasoning privado, razona textualmente EXCLUSIVAMENTE "
+            "en español mexicano desde el primer token; no uses inglés, no traduzcas "
+            "después y no alternes idiomas. La respuesta final también debe estar "
+            "íntegramente en español mexicano."
+        )
+        system_index = next(
+            (i for i, message in enumerate(runtime_messages) if message.get("role") == "system"),
+            None,
+        )
+        if system_index is None:
+            runtime_messages.insert(0, {"role": "system", "content": language_lock})
+        else:
+            current_system = str(runtime_messages[system_index].get("content") or "").lstrip()
+            runtime_messages[system_index]["content"] = f"{language_lock}\n\n{current_system}"
+
         for index in range(len(runtime_messages) - 1, -1, -1):
             if runtime_messages[index].get("role") == "user":
                 content = str(runtime_messages[index].get("content") or "").rstrip()
-                runtime_messages[index]["content"] = f"{content}\n\n{directive}"
+                reasoning_instruction = (
+                    "\n\nINSTRUCCIÓN DE THINKING: razona en español mexicano desde el primer token "
+                    "del canal privado de razonamiento. No uses inglés."
+                    if thinking
+                    else ""
+                )
+                runtime_messages[index]["content"] = (
+                    f"{content}{reasoning_instruction}\n\n{directive}"
+                )
                 break
 
         payload = {

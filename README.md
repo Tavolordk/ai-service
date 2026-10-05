@@ -1,4 +1,4 @@
-# SPM IA Agent API — 4.0.0 hybrid-router
+# SPM IA Agent API — 4.0.2 hybrid-router + razonamiento en español
 
 Versión optimizada para equipos con pocos recursos. El cambio principal es que las preguntas simples ya **no llaman a Qwen**. La API primero intenta resolverlas de forma determinista usando el perfil estructurado y el grafo que ya envía el frontend; sólo las preguntas analíticas pasan al LLM.
 
@@ -142,7 +142,7 @@ curl.exe http://localhost:3651/health
 La imagen esperada es:
 
 ```text
-spm-profile-intelligence-api:4.0.0-hybrid-router
+spm-profile-intelligence-api:4.0.2-spanish-reasoning
 ```
 
 ## Pruebas
@@ -156,3 +156,9 @@ Incluyen clasificación de contexto, streaming, filtros de razonamiento, presupu
 ## Sobre entrenar un modelo pequeño
 
 Esta versión ataca primero el problema que más tiempo desperdicia: usar un LLM para recuperar datos que ya están estructurados. Un modelo pequeño especializado puede añadirse después para redacción más libre de resúmenes, pero no es necesario para obtener respuesta inmediata en consultas factuales. Mantener esta separación también reduce el riesgo de que un modelo invente un CURP, RFC, conteo o domicilio que la API puede leer exactamente.
+
+## 4.0.2 — idioma del razonamiento
+
+Cuando `thinking=true`, la API agrega un bloqueo de idioma en el mensaje de sistema y justo antes de `/think` para solicitar que el canal privado textual `thinking/reasoning` de Qwen se genere en español mexicano desde el primer token. Ese canal continúa siendo privado y nunca se expone por SSE al frontend.
+
+Importante: esta configuración controla la salida textual de razonamiento que el modelo genera a través de Ollama. No existe una forma de imponer o verificar el "idioma" de representaciones internas no textuales del modelo. La respuesta visible final sí continúa validándose para mantenerse en español.

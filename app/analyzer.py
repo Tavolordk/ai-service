@@ -27,9 +27,9 @@ class AnalysisStream:
 
 
 def _single_answer_chunk(text: str) -> Iterable[LlmStreamChunk]:
-    # `replace` pinta la respuesta completa de forma atómica y evita simular streaming
-    # cuando el router determinista ya conoce el resultado.
-    yield LlmStreamChunk(kind="replace", text=text)
+    # El fast path usa el mismo flujo simple que una respuesta normal: delta + done.
+    # `replace` se reserva para correcciones reales de una salida LLM provisional.
+    yield LlmStreamChunk(kind="content", text=text)
 
 def _evidence_text(evidence: list[dict[str, Any]], max_chars: int) -> str:
     parts: list[str] = []
@@ -93,7 +93,8 @@ class PoliceAnalyzer:
             f"PREGUNTA:\n{question}\n\n"
             f"INTENCIÓN: {intent}\n\n"
             f"CONTEXTO VERIFICADO Y COMPACTADO:\n{context or '[sin evidencia pertinente]'}"
-            "\n\nSALIDA OBLIGATORIA: responde únicamente en español mexicano, con frases completas. "
+            "\n\nIDIOMA OBLIGATORIO: toda generación textual, incluido cualquier canal privado de thinking/reasoning, debe producirse en español mexicano desde el primer token. "
+            "SALIDA VISIBLE: responde únicamente en español mexicano, con frases completas. "
             "No muestres ni traduzcas el razonamiento interno; entrega sólo la respuesta final solicitada. "
             "No repitas todos los registros si basta con sintetizarlos."
         )
