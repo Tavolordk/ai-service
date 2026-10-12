@@ -54,7 +54,7 @@ def test_payload_keeps_spanish_lock_and_no_think():
     assert payload["think"] is False
 
 
-def test_payload_keeps_spanish_lock_in_thinking_mode():
+def test_payload_keeps_final_spanish_only_in_thinking_mode():
     cfg = replace(settings, llm_num_ctx=8192, llm_max_predict=1200)
     client = LocalOllamaClient(cfg)
     payload = json.loads(client._payload(
@@ -69,9 +69,8 @@ def test_payload_keeps_spanish_lock_in_thinking_mode():
     ))
     system = payload["messages"][0]["content"].lower()
     user = payload["messages"][-1]["content"].lower()
-    assert "thinking/reasoning" in system
-    assert "español mexicano" in system
-    assert "instrucción de thinking" in user
+    assert "exclusivamente en español mexicano" in system
+    assert "instrucción de thinking" not in user
     assert "/think" in user
     assert payload["think"] is True
 

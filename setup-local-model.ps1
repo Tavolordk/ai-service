@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $ComposeFile = ".\docker-compose.local.yml"
 $EnvFile = ".\.env"
-$Model = "qwen3:4b"
+$Models = @("qwen3:1.7b", "qwen3:4b")
 
 function Invoke-Compose {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
@@ -33,21 +33,17 @@ if ($LASTEXITCODE -ne 0) {
 }
 $list | Write-Host
 
-if (($list -join "`n") -match [regex]::Escape($Model)) {
-    Write-Host "$Model ya está instalado. No se descargará de nuevo." -ForegroundColor Green
-    exit 0
-}
-
-Write-Host "El modelo $Model NO está instalado." -ForegroundColor Yellow
-Write-Host "Intentando descargarlo desde registry.ollama.ai..." -ForegroundColor Yellow
-& docker compose -f $ComposeFile --env-file $EnvFile exec -T ollama ollama pull $Model
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "" 
-    Write-Host "ERROR: no se pudo descargar $Model." -ForegroundColor Red
-    Write-Host "Tu red/DNS corporativo está bloqueando registry.ollama.ai." -ForegroundColor Red
-    Write-Host "La API puede construirse, pero el chatbot no responderá hasta que el modelo exista en el volumen spm-ollama-models." -ForegroundColor Yellow
-    Write-Host "Si tienes el modelo en otro equipo/servidor, usa import-model-volume.ps1 después de copiar un tar de /root/.ollama/models." -ForegroundColor Yellow
-    exit 20
+foreach ($Model in $Models) {
+    if (($list -join "`n") -match [regex]::Escape($Model)) {
+        Write-Host "$Model ya está instalado." -ForegroundColor Green
+        continue
+    }
+    Write-Host "Descargando $Model desde registry.ollama.ai..." -ForegroundColor Yellow
+    & docker compose -f $ComposeFile --env-file $EnvFile exec -T ollama ollama pull $Model
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "No se pudo descargar $Model. Revisa la conectividad o usa import-model-volume.ps1." -ForegroundColor Red
+        exit 20
+    }
 }
 
 Write-Host "Modelo instalado correctamente:" -ForegroundColor Green

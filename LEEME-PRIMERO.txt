@@ -1,0 +1,26 @@
+ENTREGA ai-service 4.1.0-cpu-optimized (generador del proyecto completo)
+
+La fuente completa está en GitHub. Debido a restricciones de acceso a archivos
+binarios de GitHub desde este entorno, este paquete NO incluye el repositorio
+íntegro de origen. Sí incluye el parche CPU, verificación, limpieza y un
+constructor que descarga/exporta el proyecto fuente, aplica todos los cambios y
+genera el ZIP final completo SIN modificar tu clon original.
+
+1. Descomprime este ZIP en una carpeta.
+2. Abre PowerShell en esa carpeta.
+3. Ejecuta:
+
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\generar_proyecto_completo.ps1 -Clone
+
+   O, si ya lo tienes clonado:
+
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\generar_proyecto_completo.ps1 -RepoPath 'C:\ruta\ai-service'
+
+4. Recibirás ai-service-4.1.0-cpu-optimized-COMPLETO.zip junto al constructor.
+
+PRECAUCIONES
+- Nunca borrar la carpeta original ni tus volúmenes Docker.
+- No distribuir el archivo .env con credenciales, ni datos de casos.
+- Requiere Python/Git y pytest para tests (pip install -r requirements-dev.txt).
+- El constructor aborta si el origen no es 4.0.4-reasoning-recovery o fallan tests.
+- -SkipTests permite exportar aunque falten dependencias, pero no verifica regresiones.

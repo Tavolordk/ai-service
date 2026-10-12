@@ -1,0 +1,22 @@
+AI-SERVICE 4.1.2-PRECISE-FAST — CAMBIOS Y DESPLIEGUE LOCAL
+
+1. Comparaciones documentales simples: cotejo determinista, sin llamada al LLM.
+2. Contrastes de fecha y placa: sólo mismo campo o mismo VIN/NIV explícito.
+3. Diferencias con fuentes: se preserva el origen y referencia de cada versión.
+4. Análisis complejos/deep: Qwen recibe contexto reducido y focalizado.
+5. Guardias: comprueban valores de cada par; fallback legible con apartados.
+6. Fast Router, SSE, API, archivos de casos y volumen de Ollama se mantienen.
+
+INSTALACIÓN: Copie el contenido del ZIP a la raíz de ai-service, conservando su .env
+personal (el script crea respaldo antes de actualizar sólo variables necesarias).
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\REDEPLOY_CPU_LOCAL.ps1
+
+VERIFICACIÓN:
+curl.exe http://localhost:3651/health
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\PROBAR_IA_SPM_COMPLETA.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\PROBAR_IA_SPM_COMPLETA.ps1 -Llm
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\PROBAR_IA_SPM_COMPLETA.ps1 -Deep
+
+NUNCA ejecute docker compose down -v: eliminaría el volumen de Ollama.
+No se incluyen contraseñas, archivos locales .env o casos.

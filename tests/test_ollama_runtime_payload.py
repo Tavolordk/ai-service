@@ -21,7 +21,7 @@ def test_payload_uses_dynamic_runtime_budget_and_keep_alive():
     assert "/no_think" in payload["messages"][-1]["content"]
 
 
-def test_payload_forces_spanish_in_private_thinking_channel():
+def test_payload_does_not_force_spanish_private_thinking_by_default():
     cfg = replace(settings, llm_num_ctx=8192, llm_max_predict=1200)
     client = LocalOllamaClient(cfg)
     payload = json.loads(client._payload(
@@ -36,7 +36,6 @@ def test_payload_forces_spanish_in_private_thinking_channel():
     ))
     system = payload["messages"][0]["content"].lower()
     user = payload["messages"][-1]["content"].lower()
-    assert "thinking/reasoning" in system
-    assert "español mexicano" in system
-    assert "instrucción de thinking" in user
+    assert "exclusivamente en español mexicano" in system
+    assert "instrucción de thinking" not in user
     assert "/think" in user

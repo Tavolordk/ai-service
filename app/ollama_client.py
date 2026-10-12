@@ -3,12 +3,16 @@ from __future__ import annotations
 import http.client
 import json
 import re
+import logging
+import threading
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import urlparse
 
 from .config import Settings
+from .token_budget import fit_messages
+from .evidence_guard import ungrounded_identifiers, missing_documented_pairs, missing_documented_sources, safe_evidence_fallback
 
 
 class LocalLlmError(RuntimeError):
@@ -154,6 +158,9 @@ _REASONING_LEAK_PATTERNS = tuple(
     for pattern in (
         r"\bokay[,.:;]?\s+(?:so\s+)?the user\b",
         r"\bthe user\s+(?:wants|asked|asks|is asking|needs|said|says)\b",
+        r"\bso if the context\b",
+        r"\bif the context\b",
+        r"\bas an AI\b",
         r"\blet me\s+(?:check|draft|rephrase|think|review|analy[sz]e|verify|look|write)\b",
         r"\bi\s+(?:need|should|have)\s+to\b",
         r"\bwait[,.:;]",
@@ -258,9 +265,45 @@ def _chunk_visible_text(text: str, size: int = 180) -> Iterable[str]:
         remaining = remaining[cut:].lstrip()
 
 
+_LOG = logging.getLogger(__name__)
+
+
+class LlmStats:
+    """Métricas acumuladas en memoria y seguras para múltiples solicitudes."""
+    FIELDS = ("prompt_eval_count", "prompt_eval_duration", "eval_count", "eval_duration", "load_duration")
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._by_model: dict[str, dict[str, float]] = {}
+
+    def observe(self, model: str, item: dict) -> None:
+        if not item.get("done") or "eval_count" not in item:
+            return
+        values = {key: max(0, int(item.get(key) or 0)) for key in self.FIELDS}
+        prompt_tps = values["prompt_eval_count"] * 1e9 / values["prompt_eval_duration"] if values["prompt_eval_duration"] else 0.0
+        eval_tps = values["eval_count"] * 1e9 / values["eval_duration"] if values["eval_duration"] else 0.0
+        with self._lock:
+            record = self._by_model.setdefault(model, {"calls": 0, **{key: 0.0 for key in (*self.FIELDS, "promptTokensPerSecond", "evalTokensPerSecond")}})
+            record["calls"] += 1
+            for key, value in values.items(): record[key] += value
+            record["promptTokensPerSecond"] += prompt_tps
+            record["evalTokensPerSecond"] += eval_tps
+        _LOG.info("llm_model=%s prompt_eval_count=%s prompt_eval_duration=%s eval_count=%s eval_duration=%s load_duration=%s prompt_tps=%.2f eval_tps=%.2f", model, *(values[k] for k in self.FIELDS), prompt_tps, eval_tps)
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            by_model = {name: dict(record) for name, record in self._by_model.items()}
+        averages = {}
+        for name, row in by_model.items():
+            n = row.pop("calls")
+            averages[name] = {"calls": n, **{("avg" + "".join(piece.title() for piece in key.split("_")) if "_" in key else "avg" + key[0].upper() + key[1:]): round(value/n, 2) for key, value in row.items()}}
+        return {"calls": sum(row["calls"] for row in averages.values()), "byModel": averages}
+
+
 class LocalOllamaClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.stats = LlmStats()
         parsed = urlparse(settings.llm_base_url)
         if parsed.scheme != "http":
             raise LocalLlmError("AI_LLM_BASE_URL debe usar http dentro de la red local de Docker.")
@@ -277,17 +320,16 @@ class LocalOllamaClient:
         *,
         num_ctx: int | None = None,
         num_predict: int | None = None,
+        model: str | None = None,
     ) -> bytes:
         runtime_messages = [dict(m) for m in messages]
         directive = "/think" if thinking else "/no_think"
 
         language_lock = (
-            "IDIOMA ÚNICO DE GENERACIÓN: español mexicano. "
-            "Si generas thinking/reasoning privado, razona textualmente EXCLUSIVAMENTE "
-            "en español mexicano desde el primer token; no uses inglés, no traduzcas "
-            "después y no alternes idiomas. La respuesta final también debe estar "
-            "íntegramente en español mexicano. "
-            "La deliberación interna jamás debe copiarse a la respuesta visible."
+            "Responde exclusivamente en español mexicano y sin mostrar razonamiento interno."
+            if not self.settings.force_spanish_thinking else
+            "Responde en español mexicano. Si razonas, usa español mexicano también. "
+            "Nunca expongas la deliberación interna."
         )
         system_index = next(
             (i for i, message in enumerate(runtime_messages) if message.get("role") == "system"),
@@ -303,37 +345,37 @@ class LocalOllamaClient:
             if runtime_messages[index].get("role") == "user":
                 content = str(runtime_messages[index].get("content") or "").rstrip()
                 reasoning_instruction = (
-                    "\n\nINSTRUCCIÓN DE THINKING: razona en español mexicano desde el primer token "
-                    "del canal privado de razonamiento. No uses inglés y no copies esa deliberación "
-                    "al campo de respuesta visible."
-                    if thinking
-                    else ""
+                    "\n\nINSTRUCCIÓN DE THINKING: razona en español mexicano."
+                    if thinking and self.settings.force_spanish_thinking else ""
                 )
                 runtime_messages[index]["content"] = (
                     f"{content}{reasoning_instruction}\n\n{directive}"
                 )
                 break
 
+        chosen_model = model or self.settings.llm_model
+        predict_limit = (self.settings.llm_thinking_max_predict if thinking
+                         else self.settings.llm_max_predict)
+        effective_predict = max(1, min(num_predict if num_predict is not None else predict_limit, predict_limit))
+        effective_ctx = max(256, min(num_ctx if num_ctx is not None else self.settings.llm_num_ctx, self.settings.llm_num_ctx))
+        try:
+            runtime_messages = fit_messages(runtime_messages, effective_ctx, effective_predict)
+        except ValueError as exc:
+            raise LocalLlmError(str(exc)) from exc
+        options = {
+            "temperature": self.settings.llm_temperature,
+            "num_ctx": effective_ctx,
+            "num_predict": effective_predict,
+        }
+        if self.settings.llm_num_thread is not None:
+            options["num_thread"] = self.settings.llm_num_thread
         payload = {
-            "model": self.settings.llm_model,
+            "model": chosen_model,
             "messages": runtime_messages,
             "stream": stream,
             "think": thinking,
             "keep_alive": self.settings.llm_keep_alive,
-            "options": {
-                "temperature": self.settings.llm_temperature,
-                "num_ctx": max(
-                    2048,
-                    min(num_ctx or self.settings.llm_num_ctx, self.settings.llm_num_ctx),
-                ),
-                "num_predict": max(
-                    256,
-                    min(
-                        num_predict or self.settings.llm_max_predict,
-                        self.settings.llm_max_predict,
-                    ),
-                ),
-            },
+            "options": options,
         }
         return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
@@ -344,6 +386,7 @@ class LocalOllamaClient:
         thinking: bool = False,
         num_ctx: int | None = None,
         num_predict: int | None = None,
+        model: str | None = None,
     ) -> Iterable[LlmStreamChunk]:
         """Genera, valida y sólo entonces publica la respuesta.
 
@@ -360,8 +403,20 @@ class LocalOllamaClient:
         buffered_visible: list[str] = []
         done_reason: str | None = None
         received_first_chunk = False
+        chosen_model = model or self.settings.llm_model
 
         try:
+            request_body = self._payload(
+                messages,
+                thinking=thinking,
+                stream=True,
+                num_ctx=num_ctx,
+                num_predict=num_predict,
+                model=chosen_model,
+            )
+            # Validar contra los datos que REALMENTE recibió Ollama, no contra
+            # el mensaje anterior a la compactación.
+            supplied_messages = json.loads(request_body)["messages"]
             conn = http.client.HTTPConnection(
                 self.host,
                 self.port,
@@ -370,13 +425,7 @@ class LocalOllamaClient:
             conn.request(
                 "POST",
                 "/api/chat",
-                body=self._payload(
-                    messages,
-                    thinking=thinking,
-                    stream=True,
-                    num_ctx=num_ctx,
-                    num_predict=num_predict,
-                ),
+                body=request_body,
                 headers={"Content-Type": "application/json"},
             )
             response = conn.getresponse()
@@ -420,6 +469,7 @@ class LocalOllamaClient:
                         buffered_visible.append(visible)
 
                 if item.get("done"):
+                    self.stats.observe(chosen_model, item)
                     done_reason = str(item.get("done_reason") or "") or None
                     tagged_thinking_filter.flush()
                     tail = visible_filter.flush()
@@ -447,40 +497,31 @@ class LocalOllamaClient:
         raw_text = "".join(buffered_visible).strip()
         final_text = _extract_publishable_suffix(raw_text)
 
-        # Si la respuesta quedó truncada pero el texto visible es limpio, la usamos como
-        # borrador para completar. Si contenía deliberación, jamás la realimentamos.
-        needs_regeneration = not final_text or done_reason == "length"
-        if needs_regeneration:
-            safe_draft = final_text if final_text and done_reason == "length" else ""
-            regenerated = self._regenerate_final_spanish(
-                messages,
-                draft=safe_draft,
-                strict=True,
-                hard=False,
-                num_ctx=num_ctx,
-                num_predict=num_predict,
-            )
-            final_text = _extract_publishable_suffix(regenerated)
+        # Ninguna regeneración por defecto. Antes se podían ejecutar 3 inferencias
+        # seguidas, multiplicando el tiempo de CPU y generando nuevas alucinaciones.
+        # Si la salida es errónea, utilizar evidencia extractiva sin volver a Qwen.
+        if final_text:
+            invalid_values = ungrounded_identifiers(final_text, supplied_messages)
+            missing_pairs = missing_documented_pairs(final_text, supplied_messages)
+            missing_sources = missing_documented_sources(final_text, supplied_messages)
+            if invalid_values or missing_pairs or missing_sources:
+                _LOG.warning(
+                    "Respuesta LLM descartada por hechos no respaldados: modelo=%s "
+                    "valores_no_verificados=%s pares_omitidos=%s fuentes_omitidas=%s",
+                    chosen_model, len(invalid_values), len(missing_pairs), len(missing_sources),
+                )
+                final_text = ""
 
-        # Segunda barrera: sólo si no logramos rescatar una respuesta final limpia.
         if not final_text:
-            regenerated = self._regenerate_final_spanish(
-                messages,
-                draft="",
-                strict=True,
-                hard=True,
-                num_ctx=num_ctx,
-                num_predict=num_predict,
-            )
-            final_text = _extract_publishable_suffix(regenerated)
-
-        # Último recurso: no exponemos deliberación. Este error sólo se alcanza cuando
-        # tampoco existe un sufijo final en español que pueda rescatarse.
-        if not final_text:
-            raise LocalLlmError(
-                "El modelo local respondió, pero no fue posible separar una respuesta final "
-                "en español de su deliberación interna."
-            )
+            _LOG.warning("Respuesta LLM no publicable; entregando evidencia documental: modelo=%s", chosen_model)
+            final_text = safe_evidence_fallback(supplied_messages)
+        elif done_reason == "length":
+            # Recortar al último límite de oración, sin abrir una segunda inferencia.
+            last_end = max(final_text.rfind(". "), final_text.rfind(".\n"))
+            if last_end >= 40:
+                final_text = final_text[:last_end + 1].strip()
+            elif not final_text.rstrip().endswith((".", "!", "?")):
+                final_text = safe_evidence_fallback(supplied_messages)
 
         for part in _chunk_visible_text(final_text):
             yield LlmStreamChunk("content", part)
@@ -494,6 +535,7 @@ class LocalOllamaClient:
         hard: bool = False,
         num_ctx: int | None = None,
         num_predict: int | None = None,
+        model: str | None = None,
     ) -> str:
         final_messages = [dict(message) for message in messages]
         if final_messages and final_messages[0].get("role") == "system":
@@ -544,6 +586,7 @@ class LocalOllamaClient:
             final_messages,
             num_ctx=num_ctx,
             num_predict=final_predict,
+            model=model,
         ).strip()
 
     def _chat_once_no_think(
@@ -552,6 +595,8 @@ class LocalOllamaClient:
         *,
         num_ctx: int | None = None,
         num_predict: int | None = None,
+        model: str | None = None,
+        count_metrics: bool = True,
     ) -> str:
         """Generación final directa sin reentrar al validador de streaming."""
         conn: http.client.HTTPConnection | None = None
@@ -570,6 +615,7 @@ class LocalOllamaClient:
                     stream=False,
                     num_ctx=num_ctx,
                     num_predict=num_predict,
+                    model=model,
                 ),
                 headers={"Content-Type": "application/json"},
             )
@@ -585,6 +631,8 @@ class LocalOllamaClient:
                 raise LocalLlmError(str(item["error"])[:500])
 
             message = item.get("message") or {}
+            if count_metrics:
+                self.stats.observe(model or self.settings.llm_model, item)
             # Ignorar explícitamente cualquier campo privado también en la regeneración final.
             _ = message.get("thinking") or message.get("reasoning")
             content = str(message.get("content") or "")
@@ -610,6 +658,7 @@ class LocalOllamaClient:
         thinking: bool = False,
         num_ctx: int | None = None,
         num_predict: int | None = None,
+        model: str | None = None,
     ) -> Iterable[str]:
         """Compatibilidad interna: expone sólo la respuesta final ya reconciliada."""
         full = ""
@@ -618,6 +667,7 @@ class LocalOllamaClient:
             thinking=thinking,
             num_ctx=num_ctx,
             num_predict=num_predict,
+            model=model,
         ):
             if chunk.kind == "content":
                 full += chunk.text
@@ -633,6 +683,7 @@ class LocalOllamaClient:
         thinking: bool = False,
         num_ctx: int | None = None,
         num_predict: int | None = None,
+        model: str | None = None,
     ) -> str:
         return "".join(
             self.stream_chat(
@@ -640,5 +691,25 @@ class LocalOllamaClient:
                 thinking=thinking,
                 num_ctx=num_ctx,
                 num_predict=num_predict,
+                model=model,
             )
         ).strip()
+
+
+    def warmup(self) -> None:
+        """Se invoca exclusivamente desde un thread daemon, nunca desde health/startup."""
+        if not self.settings.llm_enabled or not self.settings.llm_warmup:
+            return
+        models = dict.fromkeys((self.settings.model_for_mode("auto"), self.settings.model_for_mode("deep")))
+        for model in models:
+            try:
+                self._chat_once_no_think(
+                    [{"role": "user", "content": "Di OK."}],
+                    num_ctx=min(4096, self.settings.llm_num_ctx),
+                    num_predict=4,
+                    model=model,
+                    count_metrics=False,
+                )
+                _LOG.info("LLM warmup completado: %s", model)
+            except Exception as exc:
+                _LOG.warning("LLM warmup fallido (%s): %s", model, type(exc).__name__)

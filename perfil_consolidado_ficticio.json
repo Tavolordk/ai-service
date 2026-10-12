@@ -1,0 +1,445 @@
+{
+  "profile": {
+    "profileId": "SPM-DEMO-PERSONA-001",
+    "entityType": "Person",
+    "data": [
+      {
+        "dataType": "NOMBRE",
+        "value": "MARIO ALBERTO",
+        "origins": [
+          {
+            "sourceCode": "RENAPO_SIMULADO",
+            "date": "2026-04-02",
+            "recordReference": "REN-9001"
+          }
+        ]
+      },
+      {
+        "dataType": "APELLIDO PATERNO",
+        "value": "SERRANO",
+        "origins": [
+          {
+            "sourceCode": "RENAPO_SIMULADO",
+            "date": "2026-04-02",
+            "recordReference": "REN-9001"
+          }
+        ]
+      },
+      {
+        "dataType": "APELLIDO MATERNO",
+        "value": "VEGA",
+        "origins": [
+          {
+            "sourceCode": "RENAPO_SIMULADO",
+            "date": "2026-04-02",
+            "recordReference": "REN-9001"
+          }
+        ]
+      },
+      {
+        "dataType": "CURP",
+        "value": "CURP-FICTICIA-DEMO-001",
+        "origins": [
+          {
+            "sourceCode": "RENAPO_SIMULADO",
+            "date": "2026-04-02",
+            "recordReference": "REN-9001"
+          }
+        ]
+      },
+      {
+        "dataType": "RFC",
+        "value": "RFC-FICTICIO-001",
+        "origins": [
+          {
+            "sourceCode": "CAPTURA_INTERNA_SIMULADA",
+            "date": "2026-03-18",
+            "recordReference": "CAP-120"
+          }
+        ]
+      },
+      {
+        "dataType": "CUIP",
+        "value": "CUIP-FICTICIO-001",
+        "origins": [
+          {
+            "sourceCode": "CAPTURA_INTERNA_SIMULADA",
+            "date": "2026-03-18",
+            "recordReference": "CAP-120"
+          }
+        ]
+      },
+      {
+        "dataType": "SEXO",
+        "value": "MASCULINO",
+        "origins": [
+          {
+            "sourceCode": "RENAPO_SIMULADO",
+            "date": "2026-04-02",
+            "recordReference": "REN-9001"
+          }
+        ]
+      },
+      {
+        "dataType": "NACIONALIDAD",
+        "value": "MEXICANA",
+        "origins": [
+          {
+            "sourceCode": "RENAPO_SIMULADO",
+            "date": "2026-04-02",
+            "recordReference": "REN-9001"
+          }
+        ]
+      },
+      {
+        "dataType": "FECHA DE NACIMIENTO",
+        "value": "1990-05-16",
+        "origins": [
+          {
+            "sourceCode": "RENAPO_SIMULADO",
+            "date": "2026-04-02",
+            "recordReference": "REN-9001"
+          }
+        ]
+      },
+      {
+        "dataType": "FECHA DE NACIMIENTO",
+        "value": "1990-05-18",
+        "origins": [
+          {
+            "sourceCode": "CAPTURA_INTERNA_SIMULADA",
+            "date": "2026-03-18",
+            "recordReference": "CAP-120"
+          }
+        ]
+      },
+      {
+        "dataType": "LUGAR DE NACIMIENTO",
+        "value": "CHILPANCINGO, GUERRERO",
+        "origins": [
+          {
+            "sourceCode": "RENAPO_SIMULADO",
+            "date": "2026-04-02",
+            "recordReference": "REN-9001"
+          }
+        ]
+      },
+      {
+        "dataType": "ESTADO CIVIL",
+        "value": "SOLTERO",
+        "origins": [
+          {
+            "sourceCode": "CAPTURA_INTERNA_SIMULADA",
+            "date": "2026-03-18",
+            "recordReference": "CAP-120"
+          }
+        ]
+      },
+      {
+        "dataType": "OCUPACION",
+        "value": "COMERCIANTE",
+        "origins": [
+          {
+            "sourceCode": "CAPTURA_INTERNA_SIMULADA",
+            "date": "2026-03-18",
+            "recordReference": "CAP-120"
+          }
+        ]
+      },
+      {
+        "dataType": "ALIAS",
+        "value": "NINGUNO REGISTRADO",
+        "origins": [
+          {
+            "sourceCode": "CAPTURA_INTERNA_SIMULADA",
+            "date": "2026-03-18",
+            "recordReference": "CAP-120"
+          }
+        ]
+      },
+      {
+        "dataType": "ESTATUS DEL REGISTRO",
+        "value": "REGISTRO DE PRUEBA, SIN VALIDACION EXTERNA",
+        "origins": [
+          {
+            "sourceCode": "CAPTURA_INTERNA_SIMULADA",
+            "date": "2026-03-18",
+            "recordReference": "CAP-120"
+          }
+        ]
+      }
+    ],
+    "inconsistenciasDocumentales": [
+      {
+        "tipo": "POSIBLE DISCREPANCIA",
+        "campo": "FECHA DE NACIMIENTO",
+        "valorFuenteA": "1990-05-16",
+        "fuenteA": "RENAPO_SIMULADO",
+        "valorFuenteB": "1990-05-18",
+        "fuenteB": "CAPTURA_INTERNA_SIMULADA",
+        "interpretacion": "Diferencia entre documentos por verificar; no elegir una fecha sin evidencia adicional."
+      },
+      {
+        "tipo": "POSIBLE DISCREPANCIA",
+        "campo": "PLACA DEL MISMO VIN",
+        "identificadorVehiculo": "VIN-FICTICIO-001",
+        "valorFuenteA": "ABC123A",
+        "fuenteA": "REPUVE_SIMULADO",
+        "valorFuenteB": "ABC128A",
+        "fuenteB": "REGISTRO_VEHICULAR_SIMULADO",
+        "interpretacion": "Podría ser actualización histórica o error de captura; no concluir fraude."
+      }
+    ],
+    "addresses": [
+      {
+        "type": "DOMICILIO",
+        "street": "AVENIDA UNIVERSIDAD",
+        "exteriorNumber": "120",
+        "interiorNumber": "2",
+        "neighborhood": "CENTRO",
+        "municipality": "CHILPANCINGO DE LOS BRAVO",
+        "state": "GUERRERO",
+        "postalCode": "39000",
+        "origins": [
+          {
+            "sourceCode": "CAPTURA_INTERNA_SIMULADA",
+            "date": "2026-03-18",
+            "recordReference": "CAP-120"
+          }
+        ]
+      },
+      {
+        "type": "DOMICILIO ANTERIOR",
+        "street": "CALLE LIBERTAD",
+        "exteriorNumber": "58",
+        "neighborhood": "PROGRESO",
+        "municipality": "ACAPULCO DE JUAREZ",
+        "state": "GUERRERO",
+        "postalCode": "39350",
+        "origins": [
+          {
+            "sourceCode": "PADRON_MUNICIPAL_SIMULADO",
+            "date": "2024-05-10",
+            "recordReference": "PAD-226"
+          }
+        ]
+      },
+      {
+        "type": "DOMICILIO DE REFERENCIA",
+        "street": "CALLE MORELOS",
+        "exteriorNumber": "15",
+        "neighborhood": "CENTRO",
+        "municipality": "CHILPANCINGO DE LOS BRAVO",
+        "state": "GUERRERO",
+        "postalCode": "39000",
+        "origins": [
+          {
+            "sourceCode": "RND_SIMULADO",
+            "date": "2025-11-03",
+            "recordReference": "RND-771"
+          }
+        ]
+      }
+    ],
+    "vehicles": [
+      {
+        "type": "VEHICULO",
+        "brand": "NISSAN",
+        "model": "VERSA",
+        "year": 2019,
+        "color": "BLANCO",
+        "vin": "VIN-FICTICIO-001",
+        "licensePlate": "ABC123A",
+        "status": "REGISTRADO",
+        "origins": [
+          {
+            "sourceCode": "REPUVE_SIMULADO",
+            "date": "2026-09-11",
+            "recordReference": "REV-900"
+          }
+        ]
+      },
+      {
+        "type": "VEHICULO",
+        "brand": "NISSAN",
+        "model": "VERSA",
+        "year": 2019,
+        "color": "BLANCO",
+        "vin": "VIN-FICTICIO-001",
+        "licensePlate": "ABC128A",
+        "status": "REGISTRO DE CONSULTA",
+        "origins": [
+          {
+            "sourceCode": "REGISTRO_VEHICULAR_SIMULADO",
+            "date": "2026-09-26",
+            "recordReference": "VEH-781"
+          }
+        ]
+      },
+      {
+        "type": "VEHICULO",
+        "brand": "CHEVROLET",
+        "model": "AVEO",
+        "year": 2021,
+        "color": "GRIS",
+        "vin": "VIN-FICTICIO-002",
+        "licensePlate": "GRO456B",
+        "status": "REFERIDO EN GRAFO",
+        "origins": [
+          {
+            "sourceCode": "CAPTURA_INTERNA_SIMULADA",
+            "date": "2026-03-18",
+            "recordReference": "CAP-120"
+          }
+        ]
+      }
+    ],
+    "events": [
+      {
+        "type": "CONSULTA ADMINISTRATIVA",
+        "eventDate": "2025-11-03",
+        "description": "Referencia documental de prueba; no acredita hecho delictivo.",
+        "folio": "FOLIO-DEMO-001",
+        "origins": [
+          {
+            "sourceCode": "RND_SIMULADO",
+            "date": "2025-11-03",
+            "recordReference": "RND-771"
+          }
+        ]
+      },
+      {
+        "type": "ACTUALIZACION DE REGISTRO",
+        "eventDate": "2026-09-26",
+        "description": "Diferencia de placa reportada para el mismo VIN ficticio.",
+        "folio": "FOLIO-DEMO-002",
+        "origins": [
+          {
+            "sourceCode": "REGISTRO_VEHICULAR_SIMULADO",
+            "date": "2026-09-26",
+            "recordReference": "VEH-781"
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "CONTACTO REFERENCIAL",
+        "relatedPerson": "LUCIA MARTINEZ REYES",
+        "relationship": "REFERENCIA LABORAL",
+        "origins": [
+          {
+            "sourceCode": "CAPTURA_INTERNA_SIMULADA",
+            "date": "2026-03-18",
+            "recordReference": "CAP-120"
+          }
+        ]
+      },
+      {
+        "type": "CONTACTO REFERENCIAL",
+        "relatedPerson": "CARLOS MENDOZA SOLIS",
+        "relationship": "CONTACTO DE REGISTRO",
+        "origins": [
+          {
+            "sourceCode": "CAPTURA_INTERNA_SIMULADA",
+            "date": "2026-03-18",
+            "recordReference": "CAP-120"
+          }
+        ]
+      }
+    ]
+  },
+  "graph": {
+    "selectedNodeId": "P-001",
+    "nodes": [
+      {
+        "id": "P-001",
+        "type": "Persona",
+        "title": "MARIO ALBERTO SERRANO VEGA",
+        "subtitle": "PERFIL SIMULADO"
+      },
+      {
+        "id": "V-001",
+        "type": "Vehículo",
+        "title": "NISSAN VERSA 2019",
+        "subtitle": "VIN-FICTICIO-001 / ABC123A"
+      },
+      {
+        "id": "V-002",
+        "type": "Vehículo",
+        "title": "CHEVROLET AVEO 2021",
+        "subtitle": "VIN-FICTICIO-002 / GRO456B"
+      },
+      {
+        "id": "P-002",
+        "type": "Persona",
+        "title": "LUCIA MARTINEZ REYES",
+        "subtitle": "REFERENCIA LABORAL"
+      },
+      {
+        "id": "P-003",
+        "type": "Persona",
+        "title": "CARLOS MENDOZA SOLIS",
+        "subtitle": "CONTACTO DE REGISTRO"
+      },
+      {
+        "id": "D-001",
+        "type": "Domicilio",
+        "title": "AVENIDA UNIVERSIDAD 120",
+        "subtitle": "CHILPANCINGO, GUERRERO"
+      }
+    ],
+    "links": [
+      {
+        "id": "L-001",
+        "sourceId": "P-001",
+        "targetId": "V-001",
+        "type": "RELACION VEHICULAR",
+        "description": "Coincidencia de registro, no prueba de propiedad",
+        "sourceCode": "REPUVE_SIMULADO"
+      },
+      {
+        "id": "L-002",
+        "sourceId": "P-001",
+        "targetId": "V-002",
+        "type": "REFERENCIA VEHICULAR",
+        "description": "Vínculo documental simulado",
+        "sourceCode": "CAPTURA_INTERNA_SIMULADA"
+      },
+      {
+        "id": "L-003",
+        "sourceId": "P-001",
+        "targetId": "P-002",
+        "type": "REFERENCIA LABORAL",
+        "description": "Sin parentesco verificado",
+        "sourceCode": "CAPTURA_INTERNA_SIMULADA"
+      },
+      {
+        "id": "L-004",
+        "sourceId": "P-001",
+        "targetId": "P-003",
+        "type": "CONTACTO",
+        "description": "No implica parentesco o responsabilidad",
+        "sourceCode": "CAPTURA_INTERNA_SIMULADA"
+      },
+      {
+        "id": "L-005",
+        "sourceId": "P-001",
+        "targetId": "D-001",
+        "type": "DOMICILIO DECLARADO",
+        "description": "No constituye confirmación de residencia actual",
+        "sourceCode": "CAPTURA_INTERNA_SIMULADA"
+      }
+    ]
+  },
+  "selectedNode": {
+    "id": "P-001",
+    "type": "Persona",
+    "title": "MARIO ALBERTO SERRANO VEGA",
+    "subtitle": "PERFIL SIMULADO"
+  },
+  "question": "Analiza las diferencias entre fuentes sobre fecha de nacimiento y placas para el mismo VIN. Identifica exactamente qué dicen las fuentes, distingue discrepancias de cambios históricos y no afirmes delitos ni parentescos sin evidencia. Enumera qué tendría que verificarse.",
+  "mode": "auto",
+  "thinking": false,
+  "history": []
+}

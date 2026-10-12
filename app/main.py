@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from threading import Thread
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,6 +35,12 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.allowed_ho
 case_store = CaseStore(settings)
 llm = LocalOllamaClient(settings)
 analyzer = PoliceAnalyzer(settings, llm, case_store)
+
+
+@app.on_event("startup")
+def _schedule_warmup() -> None:
+    if settings.llm_warmup and settings.llm_enabled:
+        Thread(target=llm.warmup, name="ollama-warmup", daemon=True).start()
 
 
 def _sse(event: str, data: dict) -> str:
@@ -156,6 +163,7 @@ def health():
         "fastPath": analyzer.fast_path_stats(),
         "maxContextChars": settings.context_max_chars,
         "maxContextWindow": settings.llm_num_ctx,
+        "llmStats": llm.stats.snapshot(),
     }
 
 

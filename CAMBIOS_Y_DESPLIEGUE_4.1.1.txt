@@ -1,0 +1,37 @@
+AI-SERVICE 4.1.1-EVIDENCE-SAFE — ACTUALIZACION PARA CPU
+
+REEMPLAZO
+1. Haz un respaldo de tu carpeta ai-service.
+2. Extrae este ZIP completo y copia sus archivos sobre la RAIZ del proyecto.
+3. Conserva el archivo .env original, la carpeta data/cases y el volumen Docker spm-ollama-models.
+4. Ejecuta desde PowerShell dentro de la raíz:
+
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\REDEPLOY_CPU_LOCAL.ps1
+
+VERIFICACION
+  docker compose -f .\docker-compose.local.yml --env-file .\.env ps
+  curl.exe http://localhost:3651/health
+  docker logs --tail 100 profile-intelligence-api
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\PROBAR_IA_SPM_COMPLETA.ps1
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\PROBAR_IA_SPM_COMPLETA.ps1 -Deep
+
+CAMBIOS CLAVE
+- Conserva fechas, placas, VIN, fuentes y valores documentales sin cortes a mitad de campo.
+- Reduce el prompt del sistema para reservar CPU y contexto a los hechos.
+- Estima tokens mejor que el recorte anterior basado en un byte por token.
+- Verifica fechas, años, placas, variantes y fuentes antes de publicar respuestas.
+- Nunca dispara regeneraciones adicionales por defecto: una sola inferencia por respuesta.
+- Devuelve evidencia documentada si no se puede validar la redacción del LLM.
+- Conserva SSE, endpoints, Fast Router, Context Builder, caché, volumen y datos de casos.
+- OLLAMA_NO_CLOUD=1 en compose local y por defecto modelos existentes qwen3:1.7b/4b.
+- Prueba ficticia lista para repetir y medir tiempos reales.
+
+VERIFICACIÓN HECHA EN ESTE ENTORNO
+44 tests aprobados, 2 omitidos por falta de ijson (se instala dentro del contenedor).
+Sintaxis Python y estructura YAML verificadas. Inferencia real de Ollama NO ejecutada aquí.
+Los guardarraíles no reemplazan verificación humana en análisis policial.
+
+IMPORTANTE
+- NO ejecutes docker compose down -v ni docker volume rm spm-ollama-models.
+- El ZIP no incluye tu .env, modelos ni datos reales.
+- Copiar encima no elimina archivos antiguos de la carpeta destino; .dockerignore evita incluirlos en la imagen Docker.

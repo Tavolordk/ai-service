@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from .config import settings
 
 
 class FlexibleModel(BaseModel):
@@ -31,7 +32,7 @@ class ChatRequest(FlexibleModel):
     selectedNode: dict[str, Any] | None = None
     graph: dict[str, Any] | None = None
     history: list[ChatHistoryMessage] = Field(default_factory=list, max_length=24)
-    thinking: bool = False
+    thinking: bool = Field(default_factory=lambda: settings.llm_thinking_default)
     mode: Literal["quick", "auto", "deep"] = "auto"
     caseId: str | None = None
 
@@ -39,7 +40,7 @@ class ChatRequest(FlexibleModel):
 class CaseChatRequest(FlexibleModel):
     question: str = Field(min_length=1, max_length=12000)
     history: list[ChatHistoryMessage] = Field(default_factory=list, max_length=24)
-    thinking: bool = False
+    thinking: bool = Field(default_factory=lambda: settings.llm_thinking_default)
     mode: Literal["quick", "auto", "deep"] = "auto"
 
 

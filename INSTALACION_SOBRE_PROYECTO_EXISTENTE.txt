@@ -1,0 +1,26 @@
+AI-SERVICE 4.1.2 PRECISE-FAST - INSTALACIÓN SOBRE PROYECTO EXISTENTE
+
+1. Haz respaldo de la carpeta ai-service original.
+2. Abre el ZIP, copia sus archivos y carpetas SOBRE la raíz de tu proyecto ai-service. Sobrescribe los archivos de código existentes.
+3. Conserva tu archivo .env, carpeta data/cases y volumen Docker spm-ollama-models.
+4. Abre PowerShell en la raíz y ejecuta:
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\REDEPLOY_CPU_LOCAL.ps1
+
+Alternativa manual:
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\migrate_env_cpu.ps1
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup-local-model.ps1
+  docker compose -f .\docker-compose.local.yml --env-file .\.env build --no-cache profile-intelligence-api
+  docker compose -f .\docker-compose.local.yml --env-file .\.env up -d --force-recreate
+  curl.exe http://localhost:3651/health
+  docker logs --tail 100 profile-intelligence-api
+
+NO ejecutes docker compose down -v: eso destruiría los pesos del modelo.
+Importante: copiar archivos encima NO borra automáticamente ficheros antiguos del destino. No deben estar en el build si .dockerignore está actualizado.
+La descarga de qwen3:1.7b requiere conectividad con registry.ollama.ai; en redes corporativas restringidas importa el modelo offline.
+
+Pruebas verificadas en entorno de preparación (sin inferencia real de Ollama): 51 passed, 2 skipped por ausencia local de la dependencia ijson. No se ejecutó inferencia real Ollama ni Docker Desktop.
+
+PRUEBA FUNCIONAL CON JSON FICTICIO:
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\PROBAR_IA_SPM_COMPLETA.ps1
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\PROBAR_IA_SPM_COMPLETA.ps1 -Llm
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\PROBAR_IA_SPM_COMPLETA.ps1 -Deep
