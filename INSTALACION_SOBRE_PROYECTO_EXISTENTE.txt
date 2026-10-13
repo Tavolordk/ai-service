@@ -1,4 +1,4 @@
-AI-SERVICE 4.1.2 PRECISE-FAST - INSTALACIÓN SOBRE PROYECTO EXISTENTE
+AI-SERVICE 4.2.0 LARGE-SCALE - INSTALACIÓN SOBRE PROYECTO EXISTENTE
 
 1. Haz respaldo de la carpeta ai-service original.
 2. Abre el ZIP, copia sus archivos y carpetas SOBRE la raíz de tu proyecto ai-service. Sobrescribe los archivos de código existentes.
@@ -24,3 +24,15 @@ PRUEBA FUNCIONAL CON JSON FICTICIO:
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\PROBAR_IA_SPM_COMPLETA.ps1
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\PROBAR_IA_SPM_COMPLETA.ps1 -Llm
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\PROBAR_IA_SPM_COMPLETA.ps1 -Deep
+
+
+ESCALA GRANDE: no enviar millones de vínculos al endpoint chat.
+1. Generar o disponer de un JSON que contenga perfil y/o grafo.
+2. Subirlo UNA VEZ: POST /api/v1/cases?caseId=EXPEDIENTE con cuerpo JSON crudo.
+3. Consultar: GET /api/v1/cases/EXPEDIENTE/links?nodeId=...&limit=30
+4. Chat normal: {"profile":{"profileId":"..."},"caseId":"EXPEDIENTE","question":"..."}
+5. Para grafo seleccionado: agregar "selectedNode":{"id":"NODO"}.
+Para probar: python GENERAR_CASO_MASIVO.py --links 100000 --output caso_masivo_ficticio.json
+Luego: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\PROBAR_CASO_MASIVO.ps1
+No sobrescribir .env ni eliminar datos/cases ni volumen spm-ollama-models.
+Para millones de enlaces necesita espacio de disco adicional para JSON e índices; use AI_CASE_HOST_DIR fuera de OneDrive.

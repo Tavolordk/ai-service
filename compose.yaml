@@ -31,6 +31,9 @@ services:
 
       AI_ENABLE_DOCS: "${AI_ENABLE_DOCS}"
       AI_MAX_CONTENT_LENGTH: "${AI_MAX_CONTENT_LENGTH}"
+      AI_MAX_CASE_BYTES: "${AI_MAX_CASE_BYTES:-1073741824}"
+      AI_CASE_INDEX_VALUE_CHARS: "${AI_CASE_INDEX_VALUE_CHARS:-1024}"
+      AI_CASE_SEARCH_MAX_RESULTS: "${AI_CASE_SEARCH_MAX_RESULTS:-200}"
 
       AI_LLM_ENABLED: "true"
       AI_LLM_BASE_URL: "http://ollama:11434"
@@ -50,6 +53,10 @@ services:
       AI_LLM_MAX_PREDICT: "${AI_LLM_MAX_PREDICT:-500}"
       AI_LLM_MAX_EVIDENCE: "${AI_LLM_MAX_EVIDENCE:-30}"
       AI_LLM_HISTORY_MESSAGES: "${AI_LLM_HISTORY_MESSAGES:-2}"
+
+    # Montaje writable para expedientes indexados; raíz del contenedor sigue read-only.
+    volumes:
+      - ${AI_CASE_HOST_DIR:-./data/cases}:/data/cases
 
     read_only: true
 

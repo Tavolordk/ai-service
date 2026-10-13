@@ -5,8 +5,8 @@ if (-not (Test-Path $EnvFile)) {
     Copy-Item '.\.env.example' $EnvFile
 }
 $values = [ordered]@{
-    AI_APP_VERSION='4.1.2-precise-fast'
-    AI_VERSION='4.1.2-precise-fast'
+    AI_APP_VERSION='4.2.0-large-scale'
+    AI_VERSION='4.2.0-large-scale'
     AI_LLM_MODEL='qwen3:4b'
     AI_LLM_MODEL_FAST='qwen3:1.7b'
     AI_LLM_MODEL_DEEP='qwen3:4b'
@@ -20,6 +20,8 @@ $values = [ordered]@{
     AI_LLM_MAX_EVIDENCE='30'
     AI_LLM_HISTORY_MESSAGES='2'
     AI_LLM_WARMUP='true'
+    AI_CASE_INDEX_VALUE_CHARS='1024'
+    AI_CASE_SEARCH_MAX_RESULTS='200'
 }
 $full = [System.IO.Path]::GetFullPath($EnvFile)
 $content = [System.IO.File]::ReadAllText($full)

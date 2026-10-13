@@ -39,7 +39,7 @@ def _csv(name: str, default: str) -> tuple[str, ...]:
 @dataclass(frozen=True)
 class Settings:
     app_name: str = os.getenv("AI_APP_NAME", "SPM IA Agent API")
-    app_version: str = os.getenv("AI_APP_VERSION", "4.1.2-precise-fast")
+    app_version: str = os.getenv("AI_APP_VERSION", "4.2.0-large-scale")
     host: str = os.getenv("AI_HOST", "0.0.0.0")
     port: int = _int("AI_PORT", 8080)
     enable_docs: bool = _bool("AI_ENABLE_DOCS", True)
@@ -91,6 +91,9 @@ class Settings:
     deep_batch_chars: int = _int("AI_DEEP_BATCH_CHARS", 42000)
     deep_max_chunks: int = _int("AI_DEEP_MAX_CHUNKS", 5000)
 
+    # Límites explícitos: no aceptar JSON inline gigantes por Pydantic.
+    case_index_value_chars: int = _int("AI_CASE_INDEX_VALUE_CHARS", 1024)
+    case_search_max_results: int = _int("AI_CASE_SEARCH_MAX_RESULTS", 200)
     case_data_dir: str = os.getenv("AI_CASE_DATA_DIR", "/data/cases")
 
 

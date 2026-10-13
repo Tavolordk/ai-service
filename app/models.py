@@ -42,6 +42,7 @@ class CaseChatRequest(FlexibleModel):
     history: list[ChatHistoryMessage] = Field(default_factory=list, max_length=24)
     thinking: bool = Field(default_factory=lambda: settings.llm_thinking_default)
     mode: Literal["quick", "auto", "deep"] = "auto"
+    nodeId: str | None = Field(default=None, max_length=256)
 
 
 class ChatResponse(FlexibleModel):
@@ -60,3 +61,7 @@ class CaseMetadata(FlexibleModel):
     indexedAt: str
     sourceFile: str
     databaseFile: str
+    links: int = 0
+    nodes: int = 0
+    clippedFacts: int = 0
+    indexSchema: int = 1

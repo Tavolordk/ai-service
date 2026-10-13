@@ -14,6 +14,7 @@ from .case_store import CaseStore
 from .config import settings
 from .models import CaseChatRequest, ChatRequest, ChatResponse
 from .ollama_client import LlmStreamChunk, LocalLlmError, LocalOllamaClient
+from .request_limit import InlineBodyLimit
 
 app = FastAPI(
     title=settings.app_name,
@@ -22,6 +23,8 @@ app = FastAPI(
     redoc_url="/redoc" if settings.enable_docs else None,
     openapi_url="/openapi.json" if settings.enable_docs else None,
 )
+
+app.add_middleware(InlineBodyLimit, max_bytes=settings.max_inline_content_length)
 
 app.add_middleware(
     CORSMiddleware,
@@ -158,6 +161,8 @@ def health():
         "model": settings.llm_model,
         "llmEnabled": settings.llm_enabled,
         "caseLimitBytes": settings.max_case_bytes,
+        "maxInlineBytes": settings.max_inline_content_length,
+        "indexedCaseMode": True,
         "contextOptimization": True,
         "contextCache": analyzer.cache_stats(),
         "fastPath": analyzer.fast_path_stats(),
@@ -196,6 +201,20 @@ def intelligence_chat(request: ChatRequest):
 async def ingest_case(request: Request, caseId: str = Query(min_length=1, max_length=120)):
     metadata = await case_store.ingest(caseId, request)
     return metadata.model_dump()
+
+
+@app.get("/api/v1/cases/{case_id}/search")
+def search_indexed_case(case_id: str, q: str = Query(min_length=1, max_length=1000),
+                        limit: int = Query(default=30, ge=1, le=200)):
+    return {"caseId": case_id, "items": case_store.search(case_id, q, limit=limit)}
+
+
+@app.get("/api/v1/cases/{case_id}/links")
+def get_indexed_links(case_id: str, nodeId: str = Query(min_length=1, max_length=256),
+                      limit: int = Query(default=30, ge=1, le=200),
+                      offset: int = Query(default=0, ge=0),
+                      afterEdgeId: int | None = Query(default=None, ge=0)):
+    return case_store.links(case_id, nodeId, limit=limit, offset=offset, after_edge_id=afterEdgeId)
 
 
 @app.get("/api/v1/cases/{case_id}")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -159,6 +160,16 @@ class PoliceAnalyzer:
 
     def stream_inline(self, request: ChatRequest) -> AnalysisStream:
         profile = request.profile.model_dump(mode="json")
+        # Compatibilidad: el frontend puede enviar profileId + caseId tras indexar
+        # un expediente masivo, sin volver a transferir cientos de MB por turno.
+        if (request.caseId and set(profile.keys()) <= {"profileId"}
+                and not request.graph):
+            selected = request.selectedNode if isinstance(request.selectedNode, dict) else {}
+            return self.stream_case(request.caseId, CaseChatRequest(
+                question=request.question, history=request.history,
+                thinking=request.thinking, mode=request.mode,
+                nodeId=str(selected.get("id")) if selected.get("id") is not None else None,
+            ))
 
         # El Fast Router habitual devuelve el primer valor disponible. Cuando un
         # mismo dato tiene DOS versiones, se debe cotejar antes de contestar.
@@ -279,26 +290,96 @@ class PoliceAnalyzer:
         )
 
     def stream_case(self, case_id: str, request: CaseChatRequest) -> AnalysisStream:
+        """Consulta acotada al índice, incluso con millones de escalares y vínculos."""
         intent = classify_intent(request.question)
-        multiplier = 8 if request.mode == "deep" else 2 if request.mode == "auto" else 1
-        evidence = self._case_evidence(case_id, request.question, multiplier=multiplier)
-        if request.mode == "deep":
-            evidence = self._deep_reduce(request.question, evidence)
+        # Entrada explícita de nodo. No adivinar IDs desde palabras comunes.
+        node_id = request.nodeId
+        if node_id is None:
+            match = re.search(r"\b(?:nodeId|nodoId)\s*[:=]\s*([A-Za-z0-9_.:-]{1,256})", request.question, re.I)
+            node_id = match.group(1) if match else None
+        if not node_id and not request.thinking and request.mode != "deep":
+            q = request.question.casefold()
+            count_ask = any(t in q for t in ("cuántos", "cuantos", "cantidad", "total", "número", "numero"))
+            summary_ask = any(t in q for t in ("resumen del caso", "resumen del expediente", "estadísticas del caso"))
+            if count_ask or summary_ask:
+                m = self.case_store.metadata(case_id)
+                if summary_ask or (count_ask and any(t in q for t in ("grafo", "vínculo", "vinculo", "nodo", "hecho", "registro"))):
+                    report = (f"El expediente {case_id} contiene {m.facts} hechos escalares indexados, "
+                              f"{m.links} vínculos y {m.nodes} nodos de grafo. "
+                              "Estos conteos corresponden a datos indexados, no a conclusiones sobre personas.")
+                    return AnalysisStream([], _single_answer_chunk(report),
+                                          "deterministic-fallback", "SPM Case Index", False,
+                                          "case:counts")
+        graph_result = self.case_store.links(case_id, node_id, limit=24) if node_id else None
+        graph_evidence = []
+        if graph_result:
+            graph_evidence = [
+                {"path": link["path"],
+                 "value": f"{link['sourceLabel']} --[{link['relation']}]--> {link['targetLabel']} ",
+                 "section": "relations", "score": 200}
+                for link in graph_result["links"]
+            ]
+            q = request.question.casefold()
+            if (self.settings.fast_path_enabled and not request.thinking and request.mode != "deep"
+                    and any(term in q for term in ("cuántos", "cuantos", "cantidad", "total de", "número de", "numero de"))
+                    and any(term in q for term in ("relacion", "vínculo", "vinculo", "arista", "enlace"))):
+                label = "vínculo" if graph_result["total"] == 1 else "vínculos"
+                response = f"El nodo {node_id} tiene {graph_result['total']} {label} indexados en este caso."
+                if graph_result["links"]:
+                    response += " Ejemplos: " + "; ".join(x["value"] for x in graph_evidence[:5])
+                return AnalysisStream(graph_evidence, _single_answer_chunk(response),
+                                      "deterministic-fallback", "SPM Indexed Graph", False,
+                                      "case:graph-degree")
+
+        # Comparador persistente sobre case_fields: conserva el cotejo 4.1.2
+        # también cuando hay millones de escalares fuera de una petición inline.
+        differences = self.case_store.documentary_differences(case_id, request.question)
+        if (differences and self.settings.fast_path_enabled and not request.thinking
+                and request.mode != "deep" and (
+                    straightforward_comparison(request.question, request.mode, request.thinking)
+                    or direct_conflicting_fact(request.question, differences))):
+            ev = [{"path": x.path, "value": x.value, "section": "discrepancies", "sourceCodes": [x.source], "score": 100}
+                  for d in differences for x in d.values]
+            return AnalysisStream(ev[:self.settings.llm_max_evidence],
+                                  _single_answer_chunk(documentary_report(differences, request.question)),
+                                  "deterministic-fallback", "SPM Document Comparator", False,
+                                  "case:documentary")
+        attributes, complete = self.case_store.attribute_evidence(case_id, request.question,
+                                                              limit=self.settings.llm_max_evidence)
+        q = request.question.casefold()
+        if (attributes and self.settings.fast_path_enabled and not request.thinking and request.mode != "deep"
+                and any(term in q for term in ("cuál", "cual", "qué", "que", "enumera", "muestra", "dime"))
+                and not any(term in q for term in ("analiza", "hipótesis", "hipotesis", "por qué", "porque", "compar", "investig"))):
+            answer = "Registros indexados con fuente:\n" + "\n".join("- " + x["value"] for x in attributes)
+            if not complete:
+                answer += "\nLa lista es parcial: hay más registros; especifique una entidad."
+            return AnalysisStream(attributes, _single_answer_chunk(answer),
+                                  "deterministic-fallback", "SPM Indexed Fields", False,
+                                  "case:attributes")
+        multiplier = 2 if request.mode == "deep" else 1
+        search = self._case_evidence(case_id, request.question, multiplier=multiplier)
+        documentary_ev = [{"path": x.path, "value": x.value, "section": "discrepancies",
+                            "sourceCodes": [x.source], "score": 100}
+                           for d in differences for x in d.values]
+        evidence = (documentary_ev + graph_evidence + attributes + search)[:self.settings.case_search_max_results]
+        if not evidence:
+            # No inventar hechos cuando el índice no tiene coincidencias.
+            return AnalysisStream([], _single_answer_chunk(
+                "No se encontraron registros pertinentes en el índice para esta pregunta. "
+                "Prueba con una placa, VIN, CURP o nodeId específico; no se infiere ausencia en el expediente completo."
+            ), "deterministic-fallback", "SPM Case Index", False, "case:no-matches")
         max_chars = self.settings.context_deep_max_chars if request.mode == "deep" else self.settings.context_max_chars
+        # Sólo evidencia indexada; nunca resumir lotes llamando repetidamente a Qwen.
         context = _evidence_text(evidence, max_chars)
         runtime = self._runtime(intent=intent, mode=request.mode, thinking=request.thinking)
-        messages = self._messages(request.question, context, request.history, intent=intent, num_ctx=runtime.num_ctx, num_predict=runtime.num_predict)
+        messages = self._messages(request.question, context, request.history, intent=intent,
+                                  num_ctx=runtime.num_ctx, num_predict=runtime.num_predict)
         return AnalysisStream(
             evidence=evidence,
             chunks=self.llm.stream_chat_events(
-                messages,
-                thinking=request.thinking,
-                num_ctx=runtime.num_ctx,
-                num_predict=runtime.num_predict,
-                model=self.settings.model_for_mode(request.mode),
+                messages, thinking=request.thinking, num_ctx=runtime.num_ctx,
+                num_predict=runtime.num_predict, model=self.settings.model_for_mode(request.mode),
             ),
-            mode="local-llm",
-            model=self.settings.model_for_mode(request.mode),
-            thinking=request.thinking,
-            route=f"case-llm:{intent}",
+            mode="local-llm", model=self.settings.model_for_mode(request.mode),
+            thinking=request.thinking, route=f"case-llm:{intent}",
         )

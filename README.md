@@ -1,4 +1,4 @@
-# SPM IA Agent API — 4.1.2-precise-fast
+# SPM IA Agent API — 4.2.0-large-scale
 
 Versión optimizada para equipos con pocos recursos. El cambio principal es que las preguntas simples ya **no llaman a Qwen**. La API primero intenta resolverlas de forma determinista usando el perfil estructurado y el grafo que ya envía el frontend; sólo las preguntas analíticas pasan al LLM.
 
@@ -165,7 +165,7 @@ El modo `auto`/`quick` analítico usa FAST; `deep` usa DEEP. Si `AI_LLM_MODEL_FA
 `AI_LLM_MODEL_DEEP` quedan vacíos, se reutiliza `AI_LLM_MODEL` (compatibilidad).
 
 ```env
-AI_APP_VERSION=4.1.2-precise-fast
+AI_APP_VERSION=4.2.0-large-scale
 AI_LLM_MODEL=qwen3:4b
 AI_LLM_MODEL_FAST=qwen3:1.7b
 AI_LLM_MODEL_DEEP=qwen3:4b
@@ -274,3 +274,86 @@ Para consultas de comparación documental sencilla en modos `auto` y `quick` con
 Si la salida de Qwen falla los controles documentales, se emite un resumen estructurado basado únicamente en evidencia recibida. Se preservan `/api/v1/intelligence/chat`, `/stream`, SSE, JSON de respuestas y Fast Router original.
 
 La velocidad real en CPU depende del equipo, tamaño de contexto y disponibilidad del modelo; las pruebas unitarias no representan una medición real de Ollama. Consulte `CAMBIOS_Y_DESPLIEGUE_4.1.2.txt` para despliegue local.
+
+
+## 4.2.0 — Ingesta masiva por streaming e índices por nodo (2026-10-12)
+
+**No enviar JSON con millones de vínculos a `POST /api/v1/intelligence/chat`.**
+El contrato inline sigue operativo para mensajes pequeños, protegido por
+`AI_MAX_CONTENT_LENGTH` (5 MiB por defecto). Si se excede, responde **HTTP 413**
+indicando cómo utilizar los endpoints de casos.
+
+### Prueba con datos sintéticos
+
+```powershell
+# Generar 100 mil vínculos ficticios, sin mantener la lista en RAM.
+python .\GENERAR_CASO_MASIVO.py --links 100000 --output .\caso_masivo_ficticio.json
+
+# Cargar una sola vez y consultar índice con backend desplegado.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\PROBAR_CASO_MASIVO.ps1 -JsonFile .\caso_masivo_ficticio.json -CaseId PRUEBA_MASIVA
+```
+
+Para probar **1,000,000** de enlaces, usa `--links 1000000`, comprueba el tamaño
+resultante y asegúrate de tener espacio suficiente para el JSON, índice SQLite
+y área temporal de carga. El límite por defecto es 1 GiB JSON por caso,
+configurable mediante `AI_MAX_CASE_BYTES`; no implica RAM, disco ni tiempo
+ilimitados.
+
+### Endpoints, sin cambios incompatibles
+
+- `POST /api/v1/cases?caseId=PRUEBA_MASIVA` — `Content-Type: application/json`,
+  cuerpo JSON crudo (no form-data). Escribe e indexa en streaming, fuera del
+  hilo ASGI. Si algo falla, no reemplaza el expediente existente.
+- `GET /api/v1/cases/PRUEBA_MASIVA` — metadatos: tamaño, hechos, vínculos, nodos,
+  número de valores recortados en el índice.
+- `GET /api/v1/cases/PRUEBA_MASIVA/search?q=ABC123&limit=30` — búsqueda FTS5.
+- `GET /api/v1/cases/PRUEBA_MASIVA/links?nodeId=CENTRO&limit=30` — vínculos
+  indexados, grado total del nodo y campo `nextEdgeId`.
+- Siguiente página eficiente: agregar `&afterEdgeId=<nextEdgeId>`.
+- `POST /api/v1/cases/PRUEBA_MASIVA/chat` — `question`, `mode`, `history`,
+  `thinking` y `nodeId` opcional.
+- El endpoint original `POST /api/v1/intelligence/chat` acepta:
+  `{ "profile": {"profileId":"PERSONA"}, "caseId":"PRUEBA_MASIVA",
+  "selectedNode":{"id":"CENTRO"}, "question":"¿Cuántos vínculos tiene este nodo?" }`.
+  El frontend no necesita reenviar los enlaces en cada turno.
+- Los endpoints `/chat/stream` mantienen eventos SSE meta/delta/replace/done/error.
+
+### Arquitectura, integridad y limitaciones
+
+- `ijson` (parser incremental), rutas de array reales `[n]`, escritura SQLite
+  por lotes y FTS5 para búsqueda por contenido.
+- `graph_adj` + `graph_degree`: conteo y vecinos por ID sin deserializar el grafo.
+  Usar cursor `afterEdgeId` en lugar de offsets enormes.
+- `case_fields`: fechas de nacimiento, placas del mismo VIN, CURP/RFC con
+  procedencia, para preservar cotejo documental determinista sobre casos grandes.
+- Hasta `AI_CASE_INDEX_VALUE_CHARS=1024` caracteres por valor en FTS; si un valor
+  supera eso, se conserva completo en el JSON original, pero se recorta en el
+  índice, y se contabiliza en `clippedFacts`. Los resultados son un conjunto de
+  evidencias; no prueban que no haya más datos en el expediente.
+- Máximo `AI_CASE_SEARCH_MAX_RESULTS=200` elementos por consulta de búsqueda.
+  Qwen sólo recibe una muestra pertinente ajustada al presupuesto de tokens.
+  **No se promete un análisis exhaustivo automático de millones de hechos**.
+- Los expedientes antiguos mantienen la búsqueda FTS compatible; para poder
+  consultar las nuevas tablas del grafo deben volver a cargarse e indexarse.
+- La indexación puede consumir múltiplos del tamaño original en espacio de disco
+  porque conserva JSON y SQLite (más área temporal de reindexación).
+- La prueba sintética local de 100,000 vínculos generó aproximadamente 9.25 MB
+  de JSON y 42 MB de SQLite. Es una medición de ese fixture, no de Ollama ni
+  una garantía para un millón de enlaces.
+- Para millones de registros es preferible `AI_CASE_HOST_DIR` fuera de OneDrive.
+  El directorio anterior `./data/cases` se conserva si no se configura.
+- El servicio no incorpora autenticación: no se debe publicar abiertamente.
+  Colocarlo detrás de un gateway con autenticación/autorización, TLS y cuotas.
+
+### Variables nuevas
+
+```env
+AI_MAX_CONTENT_LENGTH=5242880
+AI_MAX_CASE_BYTES=1073741824
+AI_CASE_INDEX_VALUE_CHARS=1024
+AI_CASE_SEARCH_MAX_RESULTS=200
+AI_CASE_HOST_DIR=./data/cases
+```
+
+Se conservan Fast Router, comparador documental, SSE, caché, Ollama FAST/DEEP,
+configuración del frontend y volumen `spm-ollama-models`.

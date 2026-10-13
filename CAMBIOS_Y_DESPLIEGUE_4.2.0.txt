@@ -1,0 +1,29 @@
+AI-SERVICE 4.2.0-LARGE-SCALE
+============================
+
+1. Copiar todo el contenido del ZIP sobre la raíz del proyecto ai-service.
+2. Conservar .env, data/cases y volumen spm-ollama-models; NO borrar volúmenes Docker.
+3. Ejecutar desde PowerShell (raíz del proyecto):
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\REDEPLOY_CPU_LOCAL.ps1
+4. Validar:
+   curl.exe http://localhost:3651/
+   curl.exe http://localhost:3651/health
+   docker logs --tail 100 profile-intelligence-api
+5. Para probar un caso indexado sin datos reales:
+   python .\GENERAR_CASO_MASIVO.py --links 100000 --output .\caso_masivo_ficticio.json
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\PROBAR_CASO_MASIVO.ps1
+6. Para 1 millón cambiar --links 1000000, solo con suficiente disco/CPU.
+
+Cambios: middleware 413 inline; indexación ijson por streaming; índices FTS5,
+adyacencias y grado; paginación por cursor; identificación precisa de rutas
+JSON; cotejo documental por registro y VIN; swap de índice atómico; consultas
+chat por caseId + profileId sin enviar millones de vínculos al LLM.
+
+Compatibilidad: mantiene todos los endpoints antiguos, SSE, Fast Router,
+comparador documental, Context Builder, caché, modelos qwen3:1.7b/4b,
+Ollama local y el volumen de datos.
+
+IMPORTANTE: no es un motor que permita inferir exhaustivamente sobre millones
+de registros en una sola pregunta. El sistema indexa y recupera evidencia
+selectiva. La primera indexación requiere disco y tiempo de CPU; no se ha
+probado aún el contenedor Ollama real en el Windows del usuario.
