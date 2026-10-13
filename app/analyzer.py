@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 import re
+import unicodedata
+from itertools import chain
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,6 +11,7 @@ from .case_store import CaseStore
 from .config import Settings
 from .context_builder import ContextBuilder, classify_intent
 from .fast_router import FastQueryRouter
+from .profile_answers import answer_profile_question
 from .models import CaseChatRequest, ChatRequest
 from .ollama_client import LlmStreamChunk, LocalLlmError, LocalOllamaClient
 from .police_domain import SYSTEM_PROMPT, focus_instruction
@@ -33,9 +36,19 @@ class AnalysisStream:
 
 
 def _single_answer_chunk(text: str) -> Iterable[LlmStreamChunk]:
-    # El fast path usa el mismo flujo simple que una respuesta normal: delta + done.
-    # `replace` se reserva para correcciones reales de una salida LLM provisional.
-    yield LlmStreamChunk(kind="content", text=text)
+    # Los listados largos se transmiten por partes completas sin esperar a Qwen.
+    # El contrato SSE sigue siendo delta + done; no cambia ningún endpoint.
+    if len(text) <= 1200:
+        yield LlmStreamChunk(kind="content", text=text)
+        return
+    pending = ""
+    for row in text.splitlines(keepends=True):
+        if pending and len(pending) + len(row) > 1200:
+            yield LlmStreamChunk(kind="content", text=pending)
+            pending = ""
+        pending += row
+    if pending:
+        yield LlmStreamChunk(kind="content", text=pending)
 
 def _evidence_text(evidence: list[dict[str, Any]], max_chars: int) -> str:
     parts: list[str] = []
@@ -54,6 +67,68 @@ def _evidence_text(evidence: list[dict[str, Any]], max_chars: int) -> str:
 def _history_messages(history: list[Any], max_messages: int) -> list[dict[str, str]]:
     items = history[-max_messages:] if max_messages > 0 else []
     return [{"role": msg.role, "content": msg.content} for msg in items]
+
+
+def _plain(text: Any) -> str:
+    normalized = unicodedata.normalize("NFD", str(text or "").lower())
+    return " ".join("".join(c for c in normalized if unicodedata.category(c) != "Mn").split())
+
+
+def _resolve_follow_up(question: str, history: list[Any]) -> str:
+    """Vincula referencias cortas ('los últimos 20') al tema previo del usuario."""
+    current = _plain(question)
+    if not re.search(r"\b(?:ultimos|primeros|restantes|faltantes|siguientes)\s+\d+\b", current):
+        return question
+    if any(term in current for term in ("vehicul", "person", "arma")):
+        return question
+    for message in reversed(history[-12:]):
+        if getattr(message, "role", "") != "user":
+            continue
+        old = _plain(getattr(message, "content", ""))
+        if any(term in old for term in ("vehicul", "vin", "placa")):
+            return question + " vehículos"
+        if "person" in old:
+            return question + " personas"
+        if "arma" in old:
+            return question + " armas"
+    return question
+
+
+def _requires_stronger_model(question: str, mode: str, thinking: bool) -> bool:
+    """Escala sólo preguntas que requieren explicación o contraste."""
+    if mode != "auto":
+        return False
+    if thinking:
+        return True
+    q = _plain(question)
+    return any(phrase in q for phrase in (
+        "por que", "deberia", "investig", "recomend", "prioriza",
+        "compara", "contradic", "inconsisten", "correlacion", "hipotesis",
+    ))
+
+
+def _verified_preview(question: str, profile: dict[str, Any], graph: dict[str, Any] | None) -> str:
+    """Hechos visibles sólo desde el grafo recibido; no son conclusiones del LLM."""
+    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+        return ""
+    q = _plain(question)
+    details: list[str] = []
+    if "persona" in q or (not any(t in q for t in ("vehicul", "vin", "placa", "arma")) and any(t in q for t in ("relacion", "vincul", "grafo"))):
+        count = len(FastQueryRouter._nodes_of_kind(graph, "person"))
+        details.append(f"Personas representadas: {count}.")
+        links = graph.get("links")
+        if isinstance(links, list):
+            details.append(f"Vínculos representados: {len(links)}.")
+    elif any(term in q for term in ("vehicul", "vin", "placa", "carro")):
+        details.append(f"Vehículos representados: {len(FastQueryRouter._nodes_of_kind(graph, 'vehicle'))}.")
+    elif any(term in q for term in ("arma", "calibre")):
+        details.append(f"Armas representadas: {len(FastQueryRouter._nodes_of_kind(graph, 'weapon'))}.")
+    if not details:
+        return ""
+    return ("Datos comprobados del grafo cargado:\n"
+            + "\n".join("- " + detail for detail in details[:2])
+            + "\n\nAnálisis de Lince:\n")
+
 
 
 class PoliceAnalyzer:
@@ -171,6 +246,20 @@ class PoliceAnalyzer:
                 nodeId=str(selected.get("id")) if selected.get("id") is not None else None,
             ))
 
+        # Consulta documental extensible (edad, datos personales y laborales).
+        # Se ejecuta antes del LLM, incluso en modo profundo, pues son hechos
+        # verificables. No interfiere con el grafo ni con los casos indexados.
+        factual = answer_profile_question(profile, request.question)
+        if factual is not None:
+            return AnalysisStream(
+                evidence=factual.evidence,
+                chunks=_single_answer_chunk(factual.text),
+                mode="deterministic-fallback",
+                model="Lince Consulta documental",
+                thinking=False,
+                route=factual.route,
+            )
+
         # El Fast Router habitual devuelve el primer valor disponible. Cuando un
         # mismo dato tiene DOS versiones, se debe cotejar antes de contestar.
         q_norm = request.question.casefold()
@@ -202,7 +291,7 @@ class PoliceAnalyzer:
             fast = self.fast_router.try_answer(
                 profile=profile,
                 profile_id=request.profile.profileId,
-                question=request.question,
+                question=_resolve_follow_up(request.question, request.history),
                 graph=request.graph,
                 selected_node=request.selectedNode,
                 mode=request.mode,
@@ -274,17 +363,27 @@ class PoliceAnalyzer:
             num_ctx=runtime.num_ctx,
             num_predict=runtime.num_predict,
         )
+        chosen_model = self.settings.model_for_mode(
+            "deep" if _requires_stronger_model(request.question, request.mode, request.thinking)
+            else request.mode
+        )
+        verified = (
+            _verified_preview(request.question, profile, request.graph)
+            if self.settings.progressive_evidence_enabled else ""
+        )
+        model_stream = self.llm.stream_chat_events(
+            messages,
+            thinking=request.thinking,
+            num_ctx=runtime.num_ctx,
+            num_predict=runtime.num_predict,
+            model=chosen_model,
+        )
+        chunks = chain(_single_answer_chunk(verified), model_stream) if verified else model_stream
         return AnalysisStream(
             evidence=evidence,
-            chunks=self.llm.stream_chat_events(
-                messages,
-                thinking=request.thinking,
-                num_ctx=runtime.num_ctx,
-                num_predict=runtime.num_predict,
-                model=self.settings.model_for_mode(request.mode),
-            ),
+            chunks=chunks,
             mode="local-llm",
-            model=self.settings.model_for_mode(request.mode),
+            model=chosen_model,
             thinking=request.thinking,
             route=f"llm:{intent}",
         )
